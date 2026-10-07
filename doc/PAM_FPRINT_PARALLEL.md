@@ -109,8 +109,8 @@ fprintd lets one client use the reader at a time. While a prompt waits:
 - Only a `verify-match` signal sent by the bus name that currently owns
   `net.reactivated.Fprint` counts. Any client on the system bus can address a
   signal to the module's connection; the module resolves fprintd's unique name
-  (and logind's) and ignores everything else. Earlier development versions did
-  not, and accepted forged signals: update if you installed one before this check.
+  (and logind's) and ignores everything else; a test sends forged signals from
+  another client to make sure.
 - The module connects to the fixed system bus socket.
 - A fingerprint prompt in a terminal cannot show *which* process is asking. A
   `sudo` waiting unseen in another terminal can receive a swipe meant for
