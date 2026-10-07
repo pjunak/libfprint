@@ -1,5 +1,6 @@
 /* Goodix command/lifecycle regressions. SPDX-License-Identifier: LGPL-2.1-or-later */
 #include "drivers_api.h"
+#include <glib/gstdio.h>
 #include "drivers/goodixtls/goodix.h"
 #include <openssl/err.h>
 
@@ -826,6 +827,65 @@ test_usb_reset_waits_for_read (gconstpointer read_never_finishes)
 }
 
 static void
+write_removable (const gchar *root, const gchar *name, const gchar *value)
+{
+  g_autofree gchar *dir = g_build_filename (root, "bus", "usb", "devices", name, NULL);
+  g_autofree gchar *file = g_build_filename (dir, "removable", NULL);
+  g_assert_cmpint (g_mkdir_with_parents (dir, 0700), ==, 0);
+  g_assert_true (g_file_set_contents (file, value, -1, NULL));
+}
+
+static void
+remove_tree (const gchar *path)
+{
+  g_autoptr(GDir) dir = g_dir_open (path, 0, NULL);
+  const gchar *name;
+  while (dir && (name = g_dir_read_name (dir)))
+    {
+      g_autofree gchar *child = g_build_filename (path, name, NULL);
+      if (g_file_test (child, G_FILE_TEST_IS_DIR))
+        remove_tree (child);
+      else
+        g_remove (child);
+    }
+  g_rmdir (path);
+}
+
+static void
+test_builtin_port_policy (void)
+{
+  g_autofree gchar *root = g_dir_make_tmp ("goodix-sysfs-XXXXXX", NULL);
+  const guint8 direct[] = {3};
+  const guint8 behind_hub[] = {1, 4};
+  g_autofree gchar *external = NULL;
+  g_autofree gchar *hub = NULL;
+  g_autoptr(FpDevice) dev = NULL;
+
+  /* The built-in reader: a fixed port on the root hub. */
+  write_removable (root, "3-3", "fixed\n");
+  g_assert_null (goodix_removable_link (root, 3, direct, 1));
+  /* A look-alike plugged into an external connector. */
+  write_removable (root, "3-3", "removable\n");
+  external = goodix_removable_link (root, 3, direct, 1);
+  g_assert_cmpstr (external, ==, "3-3");
+  /* Behind a hub on an external connector; the reader's own port on that
+   * hub is undescribed, so the hub's port has to decide. */
+  write_removable (root, "3-1", "removable\n");
+  write_removable (root, "3-1.4", "unknown\n");
+  hub = goodix_removable_link (root, 3, behind_hub, 2);
+  g_assert_cmpstr (hub, ==, "3-1");
+  /* Firmware that describes no ports, or no sysfs at all: nothing to judge. */
+  write_removable (root, "3-1", "unknown\n");
+  g_assert_null (goodix_removable_link (root, 3, behind_hub, 2));
+  g_assert_null (goodix_removable_link ("/nonexistent", 3, direct, 1));
+  remove_tree (root);
+
+  /* Emulated devices have no USB device to check. */
+  dev = new_device ();
+  g_assert_true (goodix_check_builtin_port (dev, NULL));
+}
+
+static void
 test_close_waits_for_read (void)
 {
   g_autoptr(FpDevice) dev = new_device ();
@@ -1299,6 +1359,7 @@ main (int argc, char **argv)
   g_test_add_data_func ("/goodixtls/driver/usb-reset-waits-for-read", NULL, test_usb_reset_waits_for_read);
   g_test_add_data_func ("/goodixtls/driver/usb-reset-read-stuck", GINT_TO_POINTER (1), test_usb_reset_waits_for_read);
   g_test_add_func ("/goodixtls/driver/close-waits-for-read", test_close_waits_for_read);
+  g_test_add_func ("/goodixtls/driver/builtin-port-policy", test_builtin_port_policy);
   g_test_add_func ("/goodixtls/driver/transient-scan-retry", test_transient_scan_retry);
   g_test_add_func ("/goodixtls/driver/rebaseline-after-held-finger", test_rebaseline_after_held_finger);
   g_test_add_func ("/goodixtls/driver/idle-rearms-finger-detection", test_idle_rearms_finger_detection);

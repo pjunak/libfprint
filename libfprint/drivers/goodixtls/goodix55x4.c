@@ -816,6 +816,86 @@ sleep_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
   fpi_image_device_deactivate_complete (FP_IMAGE_DEVICE (dev), NULL);
 }
 
+/* The TLS key shared with the sensor is the public reference key (see
+ * goodix55x4.h), so the link cannot tell the real reader from a device that
+ * only claims to be one. The real reader is wired to an internal port; a
+ * look-alike has to arrive through an external connector, which firmware
+ * describes to the kernel as removable. Refuse a reader if its port, or the
+ * port of any hub between it and the computer, is removable: a fake hub must
+ * not hide a fake reader behind an "unknown" port. Ports the firmware does
+ * not describe are accepted, since nothing distinguishes them.
+ * GOODIX_ALLOW_REMOVABLE_PORT=1 in fprintd's environment (a root-owned
+ * systemd drop-in) accepts a reader that really is connected externally. */
+static const gchar *goodix_sysfs_root = "/sys";
+
+/* @ports lists port numbers from the root hub down to the reader. Returns the
+ * sysfs name ("bus-port.port") of the first removable link, or NULL. */
+static gchar *
+goodix_removable_link (const gchar *sysfs_root, guint bus, const guint8 *ports, guint n_ports)
+{
+  g_autoptr(GString) name = g_string_new (NULL);
+
+  g_string_printf (name, "%u-", bus);
+  for (guint i = 0; i < n_ports; i++)
+    {
+      g_autofree gchar *path = NULL;
+      g_autofree gchar *contents = NULL;
+
+      g_string_append_printf (name, i ? ".%u" : "%u", ports[i]);
+      path = g_build_filename (sysfs_root, "bus", "usb", "devices", name->str, "removable", NULL);
+      if (g_file_get_contents (path, &contents, NULL, NULL) &&
+          g_strcmp0 (g_strstrip (contents), "removable") == 0)
+        return g_strdup (name->str);
+    }
+  return NULL;
+}
+
+static gboolean
+goodix_check_builtin_port (FpDevice *dev, GError **error)
+{
+  GUsbDevice *usb = fpi_device_get_usb_device (dev);
+  g_autoptr(GUsbDevice) node = NULL;
+  g_autofree gchar *removable = NULL;
+  guint8 ports[8]; /* USB allows at most seven tiers below the root hub */
+  guint n_ports = 0;
+
+  if (!usb || g_strcmp0 (g_getenv ("GOODIX_ALLOW_REMOVABLE_PORT"), "1") == 0)
+    return TRUE;
+
+  node = g_object_ref (usb);
+  for (;;)
+    {
+      g_autoptr(GUsbDevice) parent = g_usb_device_get_parent (node);
+      if (!parent)
+        break;
+      if (n_ports == G_N_ELEMENTS (ports))
+        {
+          g_propagate_error (error, fpi_device_error_new_msg (FP_DEVICE_ERROR_NOT_SUPPORTED,
+                                                              "Goodix reader is nested too deeply in USB hubs"));
+          return FALSE;
+        }
+      ports[n_ports++] = g_usb_device_get_port_number (node);
+      g_set_object (&node, parent);
+    }
+  for (guint i = 0; i < n_ports / 2; i++)
+    {
+      guint8 port = ports[i];
+      ports[i] = ports[n_ports - 1 - i];
+      ports[n_ports - 1 - i] = port;
+    }
+
+  removable = goodix_removable_link (goodix_sysfs_root, g_usb_device_get_bus (usb), ports, n_ports);
+  if (!removable)
+    return TRUE;
+  g_message ("Refusing a Goodix reader behind removable USB port %s: the built-in reader is "
+             "wired to an internal port, so this may be a device impersonating it. Set "
+             "GOODIX_ALLOW_REMOVABLE_PORT=1 for fprintd if the reader really is external.", removable);
+  g_propagate_error (error, fpi_device_error_new_msg (FP_DEVICE_ERROR_NOT_SUPPORTED,
+                                                      "Goodix reader on removable USB port %s refused",
+                                                      removable));
+  return FALSE;
+}
+
 static void
 dev_init (FpImageDevice *image_dev)
 {
@@ -824,7 +904,8 @@ dev_init (FpImageDevice *image_dev)
   /* Retry and reset budgets are per open, which is one fprintd claim. */
   self->transient_retries = 0;
   self->usb_reset_done = FALSE;
-  goodix_dev_init (FP_DEVICE (image_dev), &error);
+  if (goodix_check_builtin_port (FP_DEVICE (image_dev), &error))
+    goodix_dev_init (FP_DEVICE (image_dev), &error);
   fpi_image_device_open_complete (image_dev, error);
 }
 

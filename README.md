@@ -51,8 +51,11 @@ other distributions and rollback, are in **[INSTALL_55a2.md](INSTALL_55a2.md)**.
   from earlier forks. [Evaluation tools](doc/GOODIX_VALIDATION.md#offline-recognition-evaluation)
   exist; results from more readers are welcome.
 - **The sensor link is not secret.** Its TLS key is the public community key,
-  so it gives no protection against someone with physical access to the USB
-  bus. Use the fingerprint for convenience, next to a good password.
+  so the link cannot prove that a scan comes from the real reader. The driver
+  therefore only accepts a reader on a built-in USB port, which stops a gadget
+  plugged into an external port but not someone who opens the laptop
+  ([details](doc/GOODIX_55A2_DRIVER.md#security-of-the-usb-link)). Use the
+  fingerprint for convenience, next to a good password.
 - **Terminal `sudo` by fingerprint** cannot tell which prompt a swipe is meant
   for ([CVE-2024-37408](https://seclists.org/oss-sec/2024/q2/286)). Only swipe
   for a command you started.

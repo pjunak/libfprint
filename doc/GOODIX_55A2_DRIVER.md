@@ -71,6 +71,7 @@ even if an earlier one failed.
 | Finger detection fires but nothing touches the sensor | After 50 empty frames (2 s), go back to waiting for a finger |
 | Sleep command not acknowledged | Logged; the result already reported stands; the next activation starts from scratch |
 | Unsupported firmware or a different paired key | Fail immediately, no retry |
+| Reader behind a removable (external) USB port | Refuse to open it; see [built-in port check](#built-in-port-check) |
 | Reader unplugged or re-enumerated (hibernate) | Current operation fails; the next one uses the new device |
 | System suspend during a scan | libfprint cancels the operation; the next activation reinitializes |
 
@@ -107,11 +108,61 @@ needs a validated firmware profile. The unrelated `goodixtls511` sources
 
 ## Security of the USB link
 
-The TLS session uses the reference key that the community tools provision, and
-that key is public. It keeps the protocol working; it does not keep images
-secret from, or authenticated against, someone who can observe the USB bus or
-plug in a device posing as the reader. Treat the fingerprint as a convenience
-next to the password, not as a strong second factor.
+The sensor and the computer talk through a TLS session, which normally does
+two things: it keeps the images secret, and it proves that the messages come
+from the real sensor. Both rely on a key that only the two ends know. Windows
+pairs each reader with its own random key; Linux cannot obtain that key, so
+the community tools pair the reader with a reference key instead. That key is
+the same everywhere and is published in source code, and nobody has published
+a way to give the sensor any other key. (Guessing a 256-bit key is not
+feasible.)
+
+With a public key, the link proves nothing. A small USB device programmed to
+behave like the reader could send the computer a picture of the owner's
+fingerprint, for example one lifted from a glass, and the driver would accept
+it as a scan. Someone wired into the internal connection could also record
+images. Both need physical access, special hardware and, for the first, a
+usable copy of the fingerprint: a targeted attack, not a remote one.
+
+### Built-in port check
+
+The real reader is wired to an internal USB port. A look-alike would have to
+come in through an external connector, and laptop firmware tells the kernel
+which ports are external: the device's `removable` attribute in sysfs reads
+`removable` for them and `fixed` for internal ones. The driver therefore
+refuses to open a reader when its own port, or the port of any USB hub between
+it and the computer, is `removable`. Checking the whole chain matters: a fake
+hub plugged into an external port could otherwise present the fake reader on
+an undescribed port of its own.
+
+This turns the cheap version of the attack (plug in a gadget) into one that
+requires opening the laptop and splicing into the internal cable. It does not
+help when the firmware describes no ports (`unknown` everywhere); such readers
+are accepted, because nothing distinguishes them. It does not protect against
+someone who opens the machine. Check your laptop with:
+
+```sh
+cat /sys/bus/usb/devices/$(basename $(dirname $(grep -l 55a2 /sys/bus/usb/devices/*/idProduct)))/removable
+```
+
+`fixed` means the check protects you; `unknown` means it cannot.
+
+If your reader genuinely sits behind an external port (for example a sensor
+module on a USB adapter), the driver logs `Refusing a Goodix reader behind
+removable USB port …` and fprintd cannot open it. Allow it explicitly in
+fprintd's environment, which only root can change:
+
+```ini
+# /etc/systemd/system/fprintd.service.d/99-goodix-local.conf
+[Service]
+Environment=LD_LIBRARY_PATH=/opt/libfprint-goodix/lib
+Environment=GOODIX_ALLOW_REMOVABLE_PORT=1
+```
+
+Treat the fingerprint as a convenience next to the password, not as a strong
+second factor. Full-disk encryption is the best general protection against
+someone with physical access, and a prerequisite for any future scheme that
+keeps a secret key on the machine.
 
 ## Changes in this fork
 
@@ -125,7 +176,9 @@ Relative to the driver it started from:
 - **Robustness:** the recovery behaviours above, including one automatic USB
   reset for an unresponsive MCU (previously an opt-in environment option).
 - **Validation:** firmware is checked against exact versions; configuration,
-  detection baselines and frame lengths are validated.
+  detection baselines and frame lengths are validated; readers behind
+  removable USB ports are refused (the TLS key is public, so the port is the
+  only evidence that the reader is the built-in one).
 - **Structure:** pure protocol, profile, image and swipe modules split out of
   the driver; environment options `GOODIX_USB_RESET`, `GOODIX_SWIPE_FDT` and
   `GOODIX_SAVE_DIR` removed (image collection is an explicit tool,

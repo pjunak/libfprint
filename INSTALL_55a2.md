@@ -283,6 +283,15 @@ sudo systemctl start fprintd
 
 This error is not retried; it fails each attempt immediately.
 
+### "Refusing a Goodix reader behind removable USB port"
+
+The driver only opens a reader on a built-in USB port, because the sensor's
+TLS key is public and a device posing as the reader would come in through an
+external connector; see the [driver documentation](doc/GOODIX_55A2_DRIVER.md#built-in-port-check).
+If your reader really is connected externally, add
+`Environment=GOODIX_ALLOW_REMOVABLE_PORT=1` to the fprintd drop-in from step 2,
+then `sudo systemctl daemon-reload && sudo systemctl restart fprintd`.
+
 ### The sensor stops detecting the finger / every attempt times out
 
 When two initializations in a row get no answer, the driver resets the USB
