@@ -87,13 +87,14 @@ reader: USB is simulated, down to a TLS peer and a scripted fprintd.
 
 ## Reporting problems
 
-Please include:
+Open an issue with the **Bug report** form; it asks for the output of
+`goodix-diagnose` (reader, firmware, services and PAM, no biometric data) and
+the fprintd journal, where the driver logs why an attempt failed. Use the
+**Hardware report** form to tell us how the driver works on your laptop, even
+if everything works. Never attach fingerprint images or enrolled prints.
 
-- `python tools/goodix-diagnose.py` (or `goodix-diagnose` from the package): reader, firmware, services, PAM; no biometric data
-- `journalctl -b -u fprintd`; the driver logs why an attempt failed
-- distribution, desktop and login manager
-
-Never attach fingerprint images or enrolled prints.
+Security problems: please report them privately, as described in
+[SECURITY.md](SECURITY.md).
 
 ## Credits
 

@@ -1,0 +1,55 @@
+name: Bug report
+description: Something does not work with the 27c6:55a2 reader, fprintd or the PAM setup.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please **never attach fingerprint images, enrolled
+        prints (files under `/var/lib/fprint`) or capture sessions**: they are
+        biometric data. The diagnostics below contain none.
+
+        Security problems: please report them privately instead, see SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `pacman -Q libfprint-goodix-local`, or `git describe --always` for a source build.
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Distribution, desktop, login manager and laptop model.
+      placeholder: e.g. CachyOS, KDE Plasma 6.7, Plasma Login Manager, Lenovo IdeaPad 5 14ARE05
+    validations:
+      required: true
+  - type: textarea
+    id: diagnose
+    attributes:
+      label: Diagnostics
+      description: Output of `goodix-diagnose` (or `python tools/goodix-diagnose.py` in a source checkout). It reports the reader, firmware, services and PAM configuration.
+      render: json
+  - type: textarea
+    id: journal
+    attributes:
+      label: fprintd log
+      description: Output of `journalctl -b -u fprintd --no-pager | tail -100` around the failure.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the troubleshooting section of INSTALL_55a2.md.
+          required: true
+        - label: I did not attach fingerprint images, enrolled prints or capture sessions.
+          required: true
