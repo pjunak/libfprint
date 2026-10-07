@@ -610,7 +610,7 @@ fp_print_equal (FpPrint *self, FpPrint *other)
     {
       return g_variant_equal (self->data, other->data);
     }
-  else if (self->type == FPI_PRINT_NBIS)
+  else if (self->type == FPI_PRINT_NBIS || self->type == FPI_PRINT_SIGFM)
     {
       guint i;
 
@@ -619,6 +619,16 @@ fp_print_equal (FpPrint *self, FpPrint *other)
 
       for (i = 0; i < self->prints->len; i++)
         {
+          if (self->type == FPI_PRINT_SIGFM)
+            {
+              int a_len, b_len;
+              g_autofree guint8 *a = sigfm_serialize_binary (self->prints->pdata[i], &a_len);
+              g_autofree guint8 *b = sigfm_serialize_binary (other->prints->pdata[i], &b_len);
+              if (!a || !b || a_len != b_len || memcmp (a, b, a_len) != 0)
+                return FALSE;
+              continue;
+            }
+
           struct xyt_struct *a = g_ptr_array_index (self->prints, i);
           struct xyt_struct *b = g_ptr_array_index (other->prints, i);
 
@@ -662,6 +672,13 @@ fp_print_serialize (FpPrint *print,
 
   g_assert (data);
   g_assert (length);
+  *data = NULL;
+  *length = 0;
+  if (print->type == FPI_PRINT_SIGFM && !HAVE_SIGFM) {
+    g_variant_builder_clear (&builder);
+    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "SIGFM support is disabled in this build");
+    return FALSE;
+  }
 
   g_variant_builder_add (&builder, "i", print->type);
   g_variant_builder_add (&builder, "s", print->driver);
@@ -680,8 +697,6 @@ fp_print_serialize (FpPrint *print,
   /* Unused a{sv} for expansion */
   g_variant_builder_open (&builder, G_VARIANT_TYPE_VARDICT);
   g_variant_builder_close (&builder);
-
-  GPtrArray * to_free = g_ptr_array_new ();
 
   /* Insert NBIS print data for type NBIS, otherwise the GVariant directly */
   if (print->type == FPI_PRINT_NBIS)
@@ -727,11 +742,16 @@ fp_print_serialize (FpPrint *print,
           g_variant_builder_open (&nested, G_VARIANT_TYPE ("(ay)"));
           SigfmImgInfo * info = g_ptr_array_index (print->prints, i);
           int slen;
-          unsigned char * serialized = sigfm_serialize_binary (info, &slen);
+          g_autofree unsigned char *serialized = sigfm_serialize_binary (info, &slen);
+          if (!serialized) {
+            g_variant_builder_clear (&nested);
+            g_variant_builder_clear (&builder);
+            g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "SIGFM serialization failed");
+            return FALSE;
+          }
           g_variant_builder_add_value (
             &nested, g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE,
                                                 serialized, slen, 1));
-          g_ptr_array_add (to_free, serialized);
           g_variant_builder_close (&nested);
         }
       g_variant_builder_close (&nested);
@@ -765,7 +785,6 @@ fp_print_serialize (FpPrint *print,
 
   g_variant_get_data (result);
   g_variant_store (result, (*data) + 3);
-  g_clear_object (&to_free);
 
   return TRUE;
 }
@@ -801,8 +820,8 @@ fp_print_deserialize (const guchar *data,
   const gchar *device_id;
   gboolean device_stored;
 
-  g_assert (data);
-  g_assert (length > 3);
+  if (!data || length <= 3)
+    goto invalid_format;
 
   if (memcmp (data, "FP3", 3) != 0)
     goto invalid_format;
@@ -821,7 +840,7 @@ fp_print_deserialize (const guchar *data,
                                        aligned_data, length - 3,
                                        FALSE, g_free, aligned_data);
 
-  if (!raw_value)
+  if (!raw_value || !g_variant_is_normal_form (raw_value))
     goto invalid_format;
 
   if (G_BYTE_ORDER == G_BIG_ENDIAN)
@@ -843,6 +862,29 @@ fp_print_deserialize (const guchar *data,
                  &print_data);
 
   finger = finger_int8;
+  if (finger != FP_FINGER_UNKNOWN && !FP_FINGER_IS_VALID (finger))
+    goto invalid_format;
+  /* G_MININT32 is the serialized "no enrollment date" sentinel. GDate's
+   * largest representable year is 65535 (Julian day 23936166). */
+  if (julian_date != G_MININT32 && (julian_date <= 0 || julian_date > 23936166))
+    goto invalid_format;
+
+  /* Each matcher has a different nested schema. Validate it before using
+   * typed GVariant accessors, which otherwise abort on malformed templates. */
+  if ((type == FPI_PRINT_NBIS &&
+       !g_variant_is_of_type (print_data, G_VARIANT_TYPE ("(a(aiaiai))"))) ||
+      (type == FPI_PRINT_SIGFM &&
+       !g_variant_is_of_type (print_data, G_VARIANT_TYPE ("(a(ay))"))) ||
+      (type == FPI_PRINT_RAW &&
+       !g_variant_is_of_type (print_data, G_VARIANT_TYPE_VARIANT)))
+    goto invalid_format;
+
+  if (type == FPI_PRINT_SIGFM && !HAVE_SIGFM)
+    {
+      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                           "This enrollment uses SIGFM. Enable SIGFM support or enroll again with NBIS.");
+      return NULL;
+    }
 
   /* Assume data is valid at this point if the values are somewhat sane. */
   if (type == FPI_PRINT_NBIS)
@@ -879,7 +921,7 @@ fp_print_deserialize (const guchar *data,
           thetacol = g_variant_get_fixed_array (child, &thetalen, sizeof (gint32));
           g_variant_unref (child);
 
-          if (xlen != ylen || xlen != thetalen)
+          if (xlen == 0 || xlen != ylen || xlen != thetalen)
             goto invalid_format;
 
           if (xlen > G_N_ELEMENTS (xyt->xcol))
@@ -910,11 +952,12 @@ fp_print_deserialize (const guchar *data,
 
           sigfm_data = g_variant_get_child_value (prints, i);
 
-          GVariant * child = g_variant_get_child_value (sigfm_data, 0);
+          g_autoptr(GVariant) child = g_variant_get_child_value (sigfm_data, 0);
           gsize slen;
           const unsigned char * serialized =
             g_variant_get_fixed_array (child, &slen, sizeof (unsigned char));
-          g_variant_unref (child);
+          if (slen > G_MAXINT)
+            goto invalid_format;
 
           SigfmImgInfo * sigfm_info = sigfm_deserialize_binary (serialized, slen);
           if (!sigfm_info)
@@ -938,11 +981,12 @@ fp_print_deserialize (const guchar *data,
     }
   else
     {
-      g_warning ("Invalid print type: 0x%X", type);
+      fp_dbg ("Invalid print type: 0x%X", type);
       goto invalid_format;
     }
 
-  date = g_date_new_julian (julian_date);
+  if (julian_date != G_MININT32)
+    date = g_date_new_julian (julian_date);
   g_object_set (result,
                 "finger", finger,
                 "username", username,

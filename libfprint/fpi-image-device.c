@@ -23,6 +23,7 @@
 
 #include "fp-image-device-private.h"
 #include "fp-image-device.h"
+#include "fpi-image.h"
 
 /**
  * SECTION: fpi-image-device
@@ -320,7 +321,7 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
   else if (action == FPI_DEVICE_ACTION_VERIFY)
     {
       FpPrint *template;
-      FpiMatchResult result;
+      FpiMatchResult result = FPI_MATCH_ERROR;
 
       fpi_device_get_verify_data (device, &template);
       if (print)
@@ -522,7 +523,7 @@ fpi_image_device_image_captured (FpImageDevice *self, FpImage *image)
     }
   else
     {
-      fp_image_extract_sigfm_info (image,
+      fpi_image_extract_sigfm_info (image,
                                  fpi_device_get_cancellable (FP_DEVICE (self)),
                                  fpi_image_device_minutiae_detected, self);
     }
@@ -672,6 +673,7 @@ fpi_image_device_activate_complete (FpImageDevice *self, GError *error)
   if (error)
     {
       g_debug ("Image device activation failed");
+      fp_image_device_change_state (self, FPI_IMAGE_DEVICE_STATE_INACTIVE);
       fpi_device_action_error (FP_DEVICE (self), error);
       return;
     }

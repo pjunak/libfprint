@@ -18,6 +18,7 @@
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
 #pragma once
+#include <glib.h>
 
 #define GOODIX_EP_IN_MAX_BUF_SIZE (0x10000)
 #define GOODIX_EP_OUT_MAX_BUF_SIZE (0x40)
@@ -61,18 +62,6 @@ typedef struct __attribute__((__packed__)) _GoodixPack
   guint16 length;
 } GoodixPack;
 
-typedef struct __attribute__((__packed__)) _WeirdMCUPack {
-  guint8 flag1;
-  guint8 flag2;
-  guint8 flag3;
-  guint8 flag4;
-  guint8 flag5;
-  guint8 flag6;
-  guint8 flag7;
-  guint8 flag8;
-  guint8 flag9;
-} WeirdMCUPack;
-
 typedef struct __attribute__((__packed__)) _GoodixProtocol {
   guint8 cmd;
   guint16 length;
@@ -83,7 +72,7 @@ typedef struct __attribute__((__packed__)) _GoodixAck
   guint8 cmd;
   guint8 always_true : 1;
   guint8 has_no_config : 1;
-  guint8 : 6;
+  guint8 reserved : 6;
 } GoodixAck;
 
 typedef struct __attribute__((__packed__)) _GoodixNop
@@ -93,12 +82,12 @@ typedef struct __attribute__((__packed__)) _GoodixNop
 
 typedef struct __attribute__((__packed__)) _GoodixSetDrvState {
   guint8 unknown;
-  guint8 : 8;
+  guint8 reserved;
 } GoodixSetDrvState;
 
 typedef struct __attribute__((__packed__)) _GoodixMcuSwitchToIdleMode {
   guint8 sleep_time;
-  guint8 : 8;
+  guint8 reserved;
 } GoodixMcuSwitchToIdleMode;
 
 typedef struct __attribute__((__packed__)) _GoodixSetLed {
@@ -121,7 +110,7 @@ typedef struct __attribute__((__packed__)) _GoodixReadSensorRegister
   guint8 multiples;
   guint16 address;
   guint8 length;
-  guint8 : 8;
+  guint8 reserved;
 } GoodixReadSensorRegister;
 
 typedef struct __attribute__((__packed__)) _GoodixSetPowerdownScanFrequency
@@ -132,7 +121,7 @@ typedef struct __attribute__((__packed__)) _GoodixSetPowerdownScanFrequency
 typedef struct __attribute__((__packed__)) _GoodixEnableChip
 {
   guint8 enable;
-  guint8 : 8;
+  guint8 reserved;
 } GoodixEnableChip;
 
 typedef struct __attribute__((__packed__)) _GoodixReset
@@ -154,21 +143,15 @@ typedef struct __attribute__((__packed__)) _GoodixPresetPsk {
   guint32 offset;
 } GoodixPresetPsk;
 
-typedef struct __attribute__((__packed__)) _GoodixPresetPskResp {
-  guint32 flags;
-  guint32 length;
-  guint32 offset;
-} GoodixPresetPskResp;
-
 typedef struct __attribute__((__packed__)) _GoodixDefault
 {
   guint8 unused_flags;
-  guint8 : 8;
+  guint8 reserved;
 } GoodixDefault;
 
 typedef struct __attribute__((__packed__)) _GoodixNone
 {
-  guint16 : 16;
+  guint16 reserved;
 } GoodixNone;
 
 guint8 goodix_calc_checksum (guint8 *data,
@@ -189,13 +172,6 @@ void goodix_encode_protocol (guint8   cmd,
                              guint8 **data,
                              guint32 *data_len);
 
-gboolean goodix_decode_pack (guint8   *data,
-                             guint32   data_len,
-                             guint8   *flags,
-                             guint8  **payload,
-                             guint16  *payload_len,
-                             gboolean *valid_checksum);
-
 gboolean goodix_decode_protocol (guint8   *data,
                                  guint32   data_len,
                                  guint8   *cmd,
@@ -203,3 +179,13 @@ gboolean goodix_decode_protocol (guint8   *data,
                                  guint16  *payload_len,
                                  gboolean *valid_checksum,
                                  gboolean *valid_null_checksum);
+
+/* Borrowed packet view. 1 = packet, 0 = incomplete/padding, -1 = bad header.
+ * consumed includes preceding zero padding; payload remains owned by input. */
+typedef struct {
+  guint8 flags;
+  const guint8 *payload;
+  guint16 length;
+  gsize consumed;
+} GoodixPacket;
+gint goodix_packet_peek (const guint8 *data, gsize length, GoodixPacket *packet);

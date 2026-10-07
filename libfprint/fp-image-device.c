@@ -99,7 +99,6 @@ fp_image_device_start_capture_action (FpDevice * device)
   FpImageDevice * self = FP_IMAGE_DEVICE (device);
   FpImageDevicePrivate * priv = fp_image_device_get_instance_private (self);
   FpiDeviceAction action;
-  FpiPrintType print_type;
 
   /* There is just one action that we cannot support out
    * of the box, which is a capture without first waiting
@@ -122,9 +121,19 @@ fp_image_device_start_capture_action (FpDevice * device)
   else if (action == FPI_DEVICE_ACTION_ENROLL)
     {
       FpPrint * enroll_print = NULL;
+      FpiPrintType print_type;
 
       fpi_device_get_enroll_data (device, &enroll_print);
-      fpi_print_set_type (enroll_print, priv->algorithm);
+      g_object_get (enroll_print, "fpi-type", &print_type, NULL);
+      if (print_type == FPI_PRINT_UNDEFINED)
+        fpi_print_set_type (enroll_print, priv->algorithm);
+      else if (print_type != priv->algorithm)
+        {
+          fpi_device_action_error (device,
+            fpi_device_error_new_msg (FP_DEVICE_ERROR_DATA_INVALID,
+                                     "Enrollment template uses a different matching algorithm"));
+          return;
+        }
     }
 
   priv->enroll_stage = 0;
@@ -193,7 +202,7 @@ fp_image_device_constructed (GObject * obj)
     priv->bz3_threshold = cls->bz3_threshold;
   priv->algorithm = FPI_PRINT_NBIS;
   if (cls->algorithm > 0)
-    priv->algorithm = cls->algorithm;
+    priv->algorithm = (FpiPrintType) cls->algorithm;
 
   G_OBJECT_CLASS (fp_image_device_parent_class)->constructed (obj);
 }

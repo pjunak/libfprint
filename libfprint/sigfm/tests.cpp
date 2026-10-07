@@ -8,7 +8,8 @@
 #include "tests-embedded.hpp"
 
 #include "img-info.hpp"
-#include <opencv2/opencv.hpp>
+#include <sstream>
+#include <string>
 
 namespace cv {
 bool operator==(const cv::KeyPoint& lhs, const cv::KeyPoint& rhs)
@@ -137,5 +138,7 @@ TEST_SUITE("binary")
             info2->descriptors.datastart, info2->descriptors.dataend));
         sigfm_free_info(info);
         sigfm_free_info(info2);
+        free(bin_data);
+        free(bin_data2);
     }
 }

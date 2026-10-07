@@ -1,10 +1,11 @@
-project('libfprint', [ 'c', 'cpp' ],
+project('libfprint', 'c',
     version: '1.94.6',
     license: 'LGPLv2.1+',
     default_options: [
         'buildtype=debugoptimized',
         'warning_level=1',
         'c_std=gnu99',
+        'cpp_std=c++17',
     ],
     meson_version: '>= 0.56.0')
 
@@ -19,7 +20,10 @@ libexecdir = prefix / get_option('libexecdir')
 datadir = prefix / get_option('datadir')
 
 cc = meson.get_compiler('c')
-cpp = meson.get_compiler('cpp')
+sigfm_cpp = false
+if not get_option('sigfm').disabled()
+    sigfm_cpp = add_languages('cpp', required: get_option('sigfm'))
+endif
 host_system = host_machine.system()
 glib_min_version = '2.56'
 
@@ -72,7 +76,9 @@ c_cflags = cc.get_supported_arguments([
     '-Werror=pointer-to-int-cast',
 ])
 add_project_arguments(common_cflags + c_cflags, language: 'c')
-add_project_arguments(common_cflags, language: 'cpp')
+if sigfm_cpp
+    add_project_arguments(common_cflags, language: 'cpp')
+endif
 
 # maintaining compatibility with the previous libtool versioning
 # current = binary - interface
@@ -104,37 +110,14 @@ virtual_drivers = [
     'virtual_device_storage',
 ]
 
-default_drivers = [
-    # 'upektc_img',
-    # 'vfs5011',
-    # 'vfs7552',
-    # 'aes3500',
-    # 'aes4000',
-    # 'aes1610',
-    # 'aes1660',
-    # 'aes2660',
-    # 'aes2501',
-    # 'aes2550',
-    # 'vfs101',
-    # 'vfs301',
-    # 'vfs0050',
-    # 'etes603',
-    # 'egis0570',
-    # 'vcom5s',
-    # 'synaptics',
-    # 'elan',
-    # 'elanmoc',
-    # 'uru4000',
-    # 'upektc',
-    # 'upeksonly',
-    # 'upekts',
-    # 'goodixmoc',
-    # 'nb1010',
-    # 'fpcmoc',
-    'goodixtls55x4',
-
-    # SPI
-    # 'elanspi',
+# This fork defaults to the Goodix 55xx driver. The upstream drivers below
+# can be selected explicitly by name.
+default_drivers = ['goodixtls55x4']
+upstream_drivers = [
+    'upektc_img', 'vfs5011', 'vfs7552', 'aes3500', 'aes4000', 'aes1610',
+    'aes1660', 'aes2660', 'aes2501', 'aes2550', 'vfs101', 'vfs301', 'vfs0050',
+    'etes603', 'egis0570', 'vcom5s', 'synaptics', 'elan', 'elanmoc', 'uru4000',
+    'upektc', 'upeksonly', 'upekts', 'goodixmoc', 'nb1010', 'fpcmoc', 'elanspi',
 ]
 
 # FIXME: All the drivers should be fixed by adjusting the byte order.
@@ -233,18 +216,6 @@ foreach i : driver_helpers
         endif
         optional_deps += openssl_dep
 
-        threads_dep = dependency('threads', required: false)
-        if not threads_dep.found()
-            error('threads is required for @0@ and possibly others'.format(driver))
-        endif
-        optional_deps += threads_dep
-    elif i == 'nss'
-        nss_dep = dependency('nss', required: false)
-        if not nss_dep.found()
-            error('nss is required for @0@ and possibly others'.format(driver))
-        endif
-
-        optional_deps += nss_dep
     elif i == 'udev'
         install_udev_rules = true
 
@@ -284,6 +255,15 @@ endforeach
 if default_drivers_are_enabled and supported_drivers != drivers
     default_drivers_are_enabled = false
 endif
+
+# data/autosuspend.hwdb lists every reader; it can only be compared with the
+# generated list when every driver is built.
+hwdb_drivers_are_enabled = supported_drivers == drivers
+foreach driver : upstream_drivers + default_drivers
+    if driver not in drivers
+        hwdb_drivers_are_enabled = false
+    endif
+endforeach
 
 root_inc = include_directories('.')
 
@@ -346,3 +326,5 @@ pkgconfig.generate(
 )
 
 summary({'Drivers': drivers, }, section: 'Drivers')
+
+subdir('tools')

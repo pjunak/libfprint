@@ -86,31 +86,6 @@ goodix_encode_protocol (guint8 cmd, guint8 *payload, guint16 payload_len,
 }
 
 gboolean
-goodix_decode_pack (guint8 *data, guint32 data_len, guint8 *flags,
-                    guint8 **payload, guint16 *payload_len,
-                    gboolean *valid_checksum)
-{
-  GoodixPack *pack = (GoodixPack *) data;
-  guint16 length;
-
-  if (data_len < sizeof (GoodixPack) + sizeof (guint8))
-    return FALSE;
-
-  length = GUINT16_FROM_LE (pack->length);
-
-  if (data_len < length + sizeof (GoodixPack) + sizeof (guint8))
-    return FALSE;
-
-  *flags = pack->flags;
-  *payload = g_memdup (data + sizeof (GoodixPack) + sizeof (guint8), length);
-  *payload_len = length;
-  *valid_checksum = goodix_calc_checksum (data, sizeof (GoodixPack)) ==
-                    data[sizeof (GoodixPack)];
-
-  return TRUE;
-}
-
-gboolean
 goodix_decode_protocol (guint8 *data, guint32 data_len, guint8 *cmd,
                         guint8 **payload, guint16 *payload_len,
                         gboolean *valid_checksum,
@@ -122,6 +97,8 @@ goodix_decode_protocol (guint8 *data, guint32 data_len, guint8 *cmd,
   if (data_len < sizeof (GoodixProtocol) + sizeof (guint8))
     return FALSE;
 
+  if (GUINT16_FROM_LE (protocol->length) == 0)
+    return FALSE;
   length = GUINT16_FROM_LE (protocol->length) - sizeof (guint8);
 
   if (data_len < length + sizeof (GoodixProtocol) + sizeof (guint8))
@@ -131,10 +108,29 @@ goodix_decode_protocol (guint8 *data, guint32 data_len, guint8 *cmd,
   *payload = g_memdup (data + sizeof (GoodixProtocol), length);
   *payload_len = length;
   *valid_checksum =
-    0xaa - goodix_calc_checksum (data, sizeof (GoodixProtocol) + length) ==
+    (guint8) (0xaa - goodix_calc_checksum (data, sizeof (GoodixProtocol) + length)) ==
     data[sizeof (GoodixProtocol) + length];
   *valid_null_checksum =
     GOODIX_NULL_CHECKSUM == data[sizeof (GoodixProtocol) + length];
 
   return TRUE;
+}
+
+gint
+goodix_packet_peek (const guint8 *data, gsize length, GoodixPacket *packet)
+{
+  gsize offset = 0;
+  *packet = (GoodixPacket) {0};
+  while (offset < length && data[offset] == 0) offset++;
+  packet->consumed = offset;
+  if (length - offset < 4) return 0;
+  const guint8 *header = data + offset;
+  if ((guint8) (header[0] + header[1] + header[2]) != header[3]) return -1;
+  guint16 size = header[1] | (header[2] << 8);
+  if (length - offset - 4 < size) return 0;
+  packet->flags = header[0];
+  packet->payload = header + 4;
+  packet->length = size;
+  packet->consumed += 4 + size;
+  return 1;
 }

@@ -232,8 +232,80 @@ test_utils = static_library('fprint-test-utils',
     dependencies: libfprint_private_dep,
     install: false)
 
+# Always run bounds/serialization coverage; the historical doctest suite is
+# optional, so it must not be the only check on stored SIGFM template parsing.
+if have_sigfm
+sigfm_binary_test = executable('test-sigfm',
+    sources: 'test-sigfm.cpp',
+    include_directories: include_directories('../libfprint'),
+    dependencies: [glib_dep, opencv],
+    link_with: libsigfm,
+    install: false)
+test('sigfm', sigfm_binary_test, suite: ['unit-tests'], env: envs)
+endif
+
+if 'goodixtls' in driver_helpers
+    goodixtls_test = executable('test-goodixtls',
+        sources: ['test-goodixtls.c', '../libfprint/drivers/goodixtls/goodixtls.c'],
+        include_directories: include_directories('../libfprint'),
+        dependencies: [gio_dep, openssl_dep],
+        install: false)
+    test('goodixtls', goodixtls_test, suite: ['unit-tests'], env: envs)
+
+    goodixtls_driver_test = executable('test-goodixtls-driver',
+        c_args: ['-Dfpi_usb_transfer_submit=record_usb_submit'],
+        sources: [
+            'test-goodixtls-driver.c',
+            '../libfprint/drivers/goodixtls/goodix-swipe.c',
+            '../libfprint/drivers/goodixtls/goodix-transport.c',
+            '../libfprint/drivers/goodixtls/goodixtls.c',
+            '../libfprint/drivers/goodixtls/goodix_proto.c',
+            '../libfprint/drivers/goodixtls/goodix-profiles.c',
+            '../libfprint/drivers/goodixtls/goodix-image.c',
+        ],
+        dependencies: [libfprint_private_dep],
+        install: false)
+    test('goodixtls-driver', goodixtls_driver_test, suite: ['unit-tests'], env: envs)
+
+    if cairo_dep.found()
+        goodixtls_capture_test = executable('test-goodixtls-capture',
+            c_args: ['-Dfpi_usb_transfer_submit=record_usb_submit'],
+            sources: [
+                'test-goodixtls-capture.c',
+                '../libfprint/fp-device.c',
+                '../libfprint/fp-image-device.c',
+                '../libfprint/fp-image.c',
+                '../libfprint/fp-print.c',
+                '../libfprint/drivers/goodixtls/goodix-transport.c',
+                '../libfprint/drivers/goodixtls/goodixtls.c',
+                '../libfprint/drivers/goodixtls/goodix_proto.c',
+                '../libfprint/drivers/goodixtls/goodix-profiles.c',
+                '../libfprint/drivers/goodixtls/goodix-image.c',
+                '../libfprint/drivers/goodixtls/goodix-swipe.c',
+            ],
+            dependencies: [libfprint_private_dep, cairo_dep],
+            install: false)
+        # About 80 s normally; sanitizer builds need considerably longer.
+        test('goodixtls-capture', goodixtls_capture_test, suite: ['unit-tests'], env: envs,
+             timeout: 300)
+    else
+        warning('Skipping public Goodix capture tests: Cairo is required for the sample image')
+        test('goodixtls-capture', find_program('sh'), suite: ['unit-tests'], args: ['-c', 'exit 77'])
+    endif
+
+    # Explicit manual hardware check; never registered as an automatic test.
+    executable('goodixtls-hardware-smoke',
+        sources: ['goodixtls-hardware-smoke.c', '../tools/capture-output.c'],
+        dependencies: libfprint_private_dep,
+        install: true,
+        install_dir: libexecdir / versioned_libname,
+        install_rpath: libdir)
+endif
+
 unit_tests = [
     'fpi-device',
+    'fpi-image-device',
+    'fpi-print',
     'fpi-ssm',
     'fpi-assembling',
 ]
@@ -277,8 +349,16 @@ foreach test_name: unit_tests
     endif
 
     basename = 'test-' + test_name
+    extra_sources = []
+    if test_name == 'fpi-image-device'
+        # Keep the public classes and private image state machine in the same
+        # binary: mixing their static/shared copies registers private enums twice.
+        extra_sources = files('../libfprint/fp-device.c', '../libfprint/fp-image-device.c')
+    elif test_name == 'fpi-print'
+        extra_sources = files('../libfprint/fp-print.c', '../libfprint/fp-image.c')
+    endif
     test_exe = executable(basename,
-        sources: [basename + '.c', test_config_h],
+        sources: [basename + '.c', test_config_h] + extra_sources,
         dependencies: [ libfprint_private_dep ] + extra_deps,
         c_args: common_cflags,
         link_whole: test_utils,
@@ -307,7 +387,7 @@ endforeach
 
 # Run udev rule generator with fatal warnings
 envs.set('UDEV_HWDB', udev_hwdb.full_path())
-envs.set('UDEV_HWDB_CHECK_CONTENTS', default_drivers_are_enabled ? '1' : '0')
+envs.set('UDEV_HWDB_CHECK_CONTENTS', hwdb_drivers_are_enabled ? '1' : '0')
 test('udev-hwdb',
      find_program('test-generated-hwdb.sh'),
      depends: udev_hwdb,
@@ -361,3 +441,36 @@ if valgrind.found()
             'LIBFPRINT_TEST_WRAPPER=' + ' '.join(libfprint_wrapper),
         ])
 endif
+
+# Pure modules link normally; no implementation-file inclusion or device needed.
+goodix_components = files('../libfprint/drivers/goodixtls/goodix_proto.c',
+                          '../libfprint/drivers/goodixtls/goodix-profiles.c',
+                          '../libfprint/drivers/goodixtls/goodix-image.c')
+components_test = executable('test-goodix-components', 'test-goodix-components.c', goodix_components,
+    include_directories: include_directories('../libfprint'), dependencies: glib_dep)
+test('goodix-components', components_test, suite: ['unit-tests'], env: envs)
+
+if get_option('fuzzing')
+    executable('generate-print-seeds', 'generate-print-seeds.c', dependencies: libfprint_private_dep)
+    if cc.get_id() != 'clang'
+        error('Fuzzing requires Clang; configure with CC=clang and -Dc_args=-fsanitize=fuzzer-no-link')
+    endif
+    executable('fuzz-goodix', 'fuzz-goodix.c', goodix_components,
+        include_directories: include_directories('../libfprint'), dependencies: glib_dep,
+        c_args: '-fsanitize=fuzzer-no-link', link_args: '-fsanitize=fuzzer')
+    executable('fuzz-print', 'fuzz-print.c', dependencies: libfprint_private_dep,
+        c_args: '-fsanitize=fuzzer-no-link', link_args: '-fsanitize=fuzzer')
+endif
+
+tools_test_deps = []
+capture_output_test = executable('test-capture-output',
+    sources: ['test-capture-output.c', '../tools/capture-output.c'], dependencies: gio_dep)
+test('capture-output', capture_output_test, suite: ['unit-tests'], env: envs)
+tools_test_env = envs
+if 'goodixtls' in driver_helpers
+    tools_test_deps += goodixtls_driver_test
+    tools_test_env.set('GOODIX_TEST_DRIVER', goodixtls_driver_test.full_path())
+endif
+test('tools', python3, args: files('test-tools.py'), suite: ['unit-tests'],
+     depends: tools_test_deps, env: tools_test_env)
+

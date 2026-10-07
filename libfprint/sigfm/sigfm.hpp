@@ -29,7 +29,10 @@ typedef unsigned char SfmPix;
  * @details Get one from sigfm_extract() and make sure to clean it up with sigfm_free_info()
  * @struct SigfmImgInfo
  */
+#ifndef LIBFPRINT_SIGFM_IMG_INFO_DEFINED
+#define LIBFPRINT_SIGFM_IMG_INFO_DEFINED
 typedef struct SigfmImgInfo SigfmImgInfo;
+#endif
 
 /**
  * @brief Extracts information from an image for later use sigfm_match_score
@@ -62,7 +65,7 @@ int sigfm_match_score(SigfmImgInfo* frame, SigfmImgInfo* enrolled);
  *
  * @param info SigfmImgInfo to store
  * @param outlen output: Length of the returned byte array
- * @return unsigned* char byte array for storage, should be free'd by the callee
+ * @return unsigned char* byte array for storage; the caller must free() it
  */
 unsigned char* sigfm_serialize_binary(SigfmImgInfo* info, int* outlen);
 /**

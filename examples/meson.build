@@ -17,10 +17,13 @@ foreach example: examples
     )
 endforeach
 
+if sigfm_cpp
 executable('cpp-test',
     'cpp-test.cpp',
     dependencies: libfprint_dep,
 )
+
+endif
 
 if installed_tests
     install_subdir('prints',

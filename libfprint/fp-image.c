@@ -48,6 +48,14 @@ enum {
 
 static GParamSpec *properties[N_PROPS];
 
+/* GDestroyNotify takes gpointer. Keep typed library destructors behind an
+ * adapter instead of calling them through an incompatible function pointer. */
+static void
+free_sigfm_info (gpointer data)
+{
+  sigfm_free_info (data);
+}
+
 FpImage *
 fp_image_new (gint width, gint height)
 {
@@ -65,6 +73,7 @@ fp_image_finalize (GObject *object)
   g_clear_pointer (&self->data, g_free);
   g_clear_pointer (&self->binarized, g_free);
   g_clear_pointer (&self->minutiae, g_ptr_array_unref);
+  g_clear_pointer (&self->sigfm_info, free_sigfm_info);
 
   G_OBJECT_CLASS (fp_image_parent_class)->finalize (object);
 }
@@ -171,51 +180,15 @@ typedef struct
   guchar              *binarized;
 } DetectMinutiaeData;
 
-typedef struct
-{
-  SigfmImgInfo        * sigfm_info;
-  guchar            * image;
-  gint                width;
-  gint                height;
-  GAsyncReadyCallback user_cb;
-} ExtractSfmData;
-
 static void
-fp_image_detect_minutiae_free (DetectMinutiaeData *data)
+fp_image_detect_minutiae_free (gpointer user_data)
 {
+  DetectMinutiaeData *data = user_data;
   g_clear_pointer (&data->image, g_free);
-  g_clear_pointer (&data->minutiae, free_minutiae);
+  if (data->minutiae)
+    free_minutiae (data->minutiae);
   g_clear_pointer (&data->binarized, g_free);
   g_free (data);
-}
-
-static void
-fp_image_sigfm_extract_free (ExtractSfmData * data)
-{
-  g_clear_pointer (&data->image, g_free);
-  g_clear_pointer (&data->sigfm_info, sigfm_free_info);
-  g_free (data);
-}
-
-static void
-fp_image_sigfm_extract_cb (GObject * source_object, GAsyncResult * res,
-                         gpointer user_data)
-{
-  GTask * task = G_TASK (res);
-  FpImage * image;
-  ExtractSfmData * data = g_task_get_task_data (task);
-
-  if (!g_task_had_error (task))
-    {
-      image = FP_IMAGE (source_object);
-
-      g_clear_pointer (&image->data, g_free);
-      image->data = g_steal_pointer (&data->image);
-      image->sigfm_info = g_steal_pointer (&data->sigfm_info);
-    }
-
-  if (data->user_cb)
-    data->user_cb (source_object, res, user_data);
 }
 
 static void
@@ -302,29 +275,6 @@ invert_colors (guint8 *data, gint width, gint height)
 
   for (i = 0; i < data_len; i++)
     data[i] = 0xff - data[i];
-}
-
-static void
-fp_image_sigfm_extract_thread_func (GTask * task, void * src_obj,
-                                  void * task_data,
-                                  GCancellable * cancellable)
-{
-  ExtractSfmData * data = task_data;
-  GTimer * timer = g_timer_new ();
-
-  data->sigfm_info = sigfm_extract (data->image, data->width, data->height);
-  g_timer_stop (timer);
-  fp_dbg ("sigfm extract completed in %f secs", g_timer_elapsed (timer, NULL));
-  g_timer_destroy (timer);
-  if (sigfm_keypoints_count (data->sigfm_info) == 0)
-    {
-      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
-                               "No keypoints found");
-      g_object_unref (task);
-      return;
-    }
-  g_task_return_boolean (task, TRUE);
-  g_object_unref (task);
 }
 
 static void
@@ -492,31 +442,6 @@ fp_image_get_minutiae (FpImage *self)
   return self->minutiae;
 }
 
-SigfmImgInfo *
-fp_image_get_sigfm_info (FpImage * self)
-{
-  return self->sigfm_info;
-}
-
-void
-fp_image_extract_sigfm_info (FpImage * self, GCancellable * cancellable,
-                           GAsyncReadyCallback callback, gpointer user_data)
-{
-  GTask * task;
-  ExtractSfmData * data = g_new0 (ExtractSfmData, 1);
-
-  task = g_task_new (self, cancellable, fp_image_sigfm_extract_cb, user_data);
-
-  data->image = g_malloc (self->width * self->height);
-  memcpy (data->image, self->data, self->width * self->height);
-  data->width = self->width;
-  data->height = self->height;
-  data->user_cb = callback;
-
-  g_task_set_task_data (task, data,
-                        (GDestroyNotify) fp_image_sigfm_extract_free);
-  g_task_run_in_thread (task, fp_image_sigfm_extract_thread_func);
-}
 /**
  * fp_image_detect_minutiae:
  * @self: A #FpImage
@@ -545,7 +470,7 @@ fp_image_detect_minutiae (FpImage            *self,
   data->ppmm = self->ppmm;
   data->user_cb = callback;
 
-  g_task_set_task_data (task, data, (GDestroyNotify) fp_image_detect_minutiae_free);
+  g_task_set_task_data (task, data, fp_image_detect_minutiae_free);
   g_task_run_in_thread (task, fp_image_detect_minutiae_thread_func);
 }
 

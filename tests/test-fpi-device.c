@@ -2166,6 +2166,13 @@ test_driver_identify_suspend_continues (void)
 }
 
 static void
+identify_timeout (FpDevice *device, gpointer user_data)
+{
+  void (**identify) (FpDevice *) = user_data;
+  (*identify) (device);
+}
+
+static void
 test_driver_identify_suspend_succeeds (void)
 {
   g_autoptr(FpAutoResetClass) dev_class = auto_reset_device_class ();
@@ -2202,7 +2209,7 @@ test_driver_identify_suspend_succeeds (void)
   /* suspend_sync hangs until cancellation, so we need to trigger orig_identify
    * from the mainloop after calling suspend_sync.
    */
-  fpi_device_add_timeout (device, 0, (FpTimeoutFunc) orig_identify, NULL, NULL);
+  fpi_device_add_timeout (device, 0, identify_timeout, &orig_identify, NULL);
 
   fake_dev->ret_suspend = fpi_device_error_new (FP_DEVICE_ERROR_NOT_SUPPORTED);
   fp_device_suspend_sync (device, NULL, &error);
@@ -2265,7 +2272,7 @@ test_driver_identify_suspend_busy_error (void)
   /* suspend_sync hangs until cancellation, so we need to trigger orig_identify
    * from the mainloop after calling suspend_sync.
    */
-  fpi_device_add_timeout (device, 0, (FpTimeoutFunc) orig_identify, NULL, NULL);
+  fpi_device_add_timeout (device, 0, identify_timeout, &orig_identify, NULL);
 
   fake_dev->ret_suspend = fpi_device_error_new (FP_DEVICE_ERROR_NOT_SUPPORTED);
   fp_device_suspend_sync (device, NULL, &error);
@@ -3278,6 +3285,29 @@ test_driver_add_timeout_func (FpDevice *device, gpointer user_data)
 }
 
 static void
+timeout_must_not_run (FpDevice *device, gpointer unused)
+{
+  g_assert_not_reached ();
+}
+
+static void
+timeout_data_destroyed (gpointer data)
+{
+  gboolean *destroyed = data;
+  *destroyed = TRUE;
+}
+
+static void
+test_destroy_device_with_pending_timeout (void)
+{
+  gboolean destroyed = FALSE;
+  g_autoptr(FpDevice) device = g_object_new (FPI_TYPE_DEVICE_FAKE, NULL);
+  fpi_device_add_timeout (device, 60000, timeout_must_not_run, &destroyed, timeout_data_destroyed);
+  g_clear_object (&device);
+  g_assert_true (destroyed);
+}
+
+static void
 test_driver_add_timeout (void)
 {
   g_autoptr(FpDevice) device = g_object_new (FPI_TYPE_DEVICE_FAKE, NULL);
@@ -3497,6 +3527,7 @@ main (int argc, char *argv[])
   g_test_add_func ("/driver/action_error/fail", test_driver_action_error_fallback_all);
 
   g_test_add_func ("/driver/timeout", test_driver_add_timeout);
+  g_test_add_func ("/driver/timeout/destroy-device", test_destroy_device_with_pending_timeout);
   g_test_add_func ("/driver/timeout/cancelled", test_driver_add_timeout_cancelled);
 
   g_test_add_func ("/driver/error_types", test_driver_error_types);

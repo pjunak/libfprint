@@ -3,3 +3,9 @@
 _build
 *.pgm
 build
+__pycache__/
+*.pyc
+*.pkg.tar.*
+crash-*
+leak-*
+timeout-*

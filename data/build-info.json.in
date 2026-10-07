@@ -1,0 +1,1 @@
+{"version": @VERSION@, "build_id": @BUILD_ID@, "sigfm": @SIGFM@, "drivers": @DRIVERS@}

@@ -1,5 +1,5 @@
 option('drivers',
-       description: 'Drivers to integrate, "default" selects the default set, "all" selects all drivers',
+       description: 'Comma-separated drivers; "default" selects goodixtls55x4, "all" adds the virtual test drivers',
        type: 'string',
        value: 'default')
 option('introspection',
@@ -34,3 +34,10 @@ option('installed-tests',
        description: 'Whether to install the installed tests',
        type: 'boolean',
        value: true)
+
+option('sigfm', type: 'feature', value: 'disabled',
+       description: 'Experimental SIGFM matcher; requires C++17 and OpenCV. NBIS does not need it.')
+option('fuzzing', type: 'boolean', value: false,
+       description: 'Build libFuzzer targets (requires Clang and sanitizer flags)')
+option('build-id', type: 'string', value: 'development',
+       description: 'Source revision or distribution build identifier')

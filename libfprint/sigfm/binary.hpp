@@ -2,10 +2,15 @@
 #pragma once
 
 #include "opencv2/core/mat.hpp"
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <cstring>
+#include <iterator>
+#include <new>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace bin {
@@ -37,7 +42,7 @@ public:
     }
 
     template<typename T, std::enable_if_t<serializer<T>::value, bool> = true>
-    constexpr stream& operator<<(T v)
+    constexpr stream& operator<<(const T& v)
     {
         serializer<T>::serialize(v, *this);
         return *this;
@@ -64,9 +69,6 @@ public:
     {
         using seg_store = std::array<byte, sizeof(T)>;
         alignas(T) seg_store s = {};
-        if (store_.size() < s.size()) {
-            throw std::runtime_error{"tried to extract from too small stream"};
-        }
         stream::read(s.begin(), s.end());
         memcpy(&v, s.data(), sizeof(T));
         return *this;
@@ -111,20 +113,27 @@ public:
                          bool> = true>
     constexpr stream& read(Iter&& begin, std::size_t dist)
     {
-        std::copy(store_.begin(), store_.begin() + dist, begin);
-        store_.erase(store_.begin(), store_.begin() + dist);
+        if (dist > size()) {
+            throw std::runtime_error{"truncated binary data"};
+        }
+        std::copy_n(store_.begin() + read_offset_, dist, begin);
+        read_offset_ += dist;
         return *this;
     }
     byte* copy_buffer() const
     {
-        byte* raw = static_cast<byte*>(malloc(store_.size()));
-        std::copy(store_.begin(), store_.end(), raw);
+        byte* raw = static_cast<byte*>(malloc(size()));
+        if (!raw && size() != 0) {
+            throw std::bad_alloc{};
+        }
+        std::copy(store_.begin() + read_offset_, store_.end(), raw);
         return raw;
     }
-    std::size_t size() const { return store_.size(); }
+    std::size_t size() const { return store_.size() - read_offset_; }
 
 private:
     std::vector<byte> store_;
+    std::size_t read_offset_ = 0;
 };
 
 template<>
@@ -132,7 +141,11 @@ struct serializer<cv::Mat> : public std::true_type {
     static void serialize(const cv::Mat& m, stream& out)
     {
         out << m.type() << m.rows << m.cols;
-        out.write(m.datastart, m.dataend);
+        // A matrix can be a view into a larger allocation. Store just its rows.
+        const auto row_bytes = static_cast<std::size_t>(m.cols) * m.elemSize();
+        for (int row = 0; row < m.rows; ++row) {
+            out.write(m.ptr(row), m.ptr(row) + row_bytes);
+        }
     }
 };
 
@@ -142,16 +155,29 @@ struct deserializer<cv::Mat> : public std::true_type {
     {
         int rows, cols, type;
         in >> type >> rows >> cols;
+        if (rows < 0 || cols < 0 || type < 0 || type != CV_MAT_TYPE(type)) {
+            throw std::runtime_error{"invalid matrix dimensions or type"};
+        }
+        // Check against the available input before allocating. Division avoids
+        // overflow when the dimensions came from a damaged template.
+        const auto element_size = CV_ELEM_SIZE(type);
+        if (rows != 0 && static_cast<std::size_t>(cols) > in.size() / element_size) {
+            throw std::runtime_error{"truncated matrix row"};
+        }
+        const auto row_bytes = static_cast<std::size_t>(cols) * element_size;
+        if (row_bytes != 0 && static_cast<std::size_t>(rows) > in.size() / row_bytes) {
+            throw std::runtime_error{"truncated matrix data"};
+        }
         cv::Mat m;
         m.create(rows, cols, type);
-        in.read(m.data, std::distance(m.datastart, m.dataend));
+        in.read(m.data, static_cast<std::size_t>(rows) * row_bytes);
         return m;
     }
 };
 
 template<typename T>
 struct deserializer<cv::Point_<T>> : public std::true_type {
-    static cv::Point2f deserialize(stream& in)
+    static cv::Point_<T> deserialize(stream& in)
     {
         cv::Point_<T> p;
         in >> p.x >> p.y;
@@ -202,8 +228,10 @@ struct deserializer<std::vector<T>> : public std::true_type {
     {
         std::size_t size;
         in >> size;
+        if (size > in.size()) {
+            throw std::runtime_error{"invalid vector length"};
+        }
         std::vector<T> vs;
-        vs.reserve(size);
         for (std::size_t n = 0; n != size; ++n) {
             T v;
             in >> v;

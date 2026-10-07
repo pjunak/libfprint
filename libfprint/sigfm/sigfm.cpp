@@ -22,19 +22,13 @@
 #include "binary.hpp"
 #include "img-info.hpp"
 
-#include "opencv2/core/persistence.hpp"
-#include "opencv2/core/types.hpp"
 #include "opencv2/features2d.hpp"
-#include "opencv2/imgcodecs.hpp"
 #include <algorithm>
-#include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
-#include <sstream>
-#include <string>
-
-#include <opencv2/opencv.hpp>
+#include <cmath>
+#include <memory>
+#include <limits>
+#include <set>
+#include <tuple>
 #include <vector>
 
 namespace bin {
@@ -74,10 +68,15 @@ struct match {
     }
     bool operator<(const match& right) const
     {
-        return (this->p1.y < right.p1.y) ||
-               ((this->p1.y < right.p1.y) && this->p1.x < right.p1.x);
+        return std::tie(p1.y, p1.x, p2.y, p2.x) <
+               std::tie(right.p1.y, right.p1.x, right.p2.y, right.p2.x);
     }
 };
+bool angle_close(double a, double b)
+{
+    const double high = std::max(a, b);
+    return high == 0 || 1 - std::min(a, b) / high <= angle_match;
+}
 struct angle {
     double cos;
     double sin;
@@ -89,23 +88,40 @@ struct angle {
 };
 } // namespace
 
-SigfmImgInfo* sigfm_copy_info(SigfmImgInfo* info) { return new SigfmImgInfo{*info}; }
+SigfmImgInfo* sigfm_copy_info(SigfmImgInfo* info)
+{
+    try { return info ? new SigfmImgInfo{*info} : nullptr; }
+    catch (...) { return nullptr; }
+}
 
-int sigfm_keypoints_count(SigfmImgInfo* info) { return info->keypoints.size(); }
+int sigfm_keypoints_count(SigfmImgInfo* info) { return info ? info->keypoints.size() : 0; }
 unsigned char* sigfm_serialize_binary(SigfmImgInfo* info, int* outlen)
 {
-    bin::stream s;
-    s << *info;
-    *outlen = s.size();
-    return s.copy_buffer();
+    if (!outlen) return nullptr;
+    *outlen = 0;
+    if (!info) return nullptr;
+    try {
+        bin::stream s;
+        s << *info;
+        if (s.size() > std::numeric_limits<int>::max()) return nullptr;
+        auto* bytes = s.copy_buffer();
+        if (bytes) *outlen = s.size();
+        return bytes;
+    } catch (...) { return nullptr; }
 }
 
 SigfmImgInfo* sigfm_deserialize_binary(const unsigned char* bytes, int len)
 {
+    if (!bytes || len <= 0) {
+        return nullptr;
+    }
     try {
         bin::stream s{bytes, bytes + len};
         auto info = std::make_unique<SigfmImgInfo>();
         s >> *info;
+        if (s.size() != 0) {
+            return nullptr;
+        }
         return info.release();
     }
     catch (const std::exception&) {
@@ -115,9 +131,11 @@ SigfmImgInfo* sigfm_deserialize_binary(const unsigned char* bytes, int len)
 
 SigfmImgInfo* sigfm_extract(const SfmPix* pix, int width, int height)
 {
+    if (!pix || width <= 0 || height <= 0) return nullptr;
+    try {
     cv::Mat img;
     img.create(height, width, CV_8UC1);
-    std::memcpy(img.data, pix, width * height);
+    std::memcpy(img.data, pix, static_cast<std::size_t>(width) * height);
     const auto roi = cv::Mat::ones(cv::Size{img.size[1], img.size[0]}, CV_8UC1);
     std::vector<cv::KeyPoint> pts;
 
@@ -126,16 +144,19 @@ SigfmImgInfo* sigfm_extract(const SfmPix* pix, int width, int height)
 
     auto* info = new SigfmImgInfo{pts, descs};
     return info;
+    } catch (...) { return nullptr; }
 }
 
 int sigfm_match_score(SigfmImgInfo* frame, SigfmImgInfo* enrolled)
 {
+    if (!frame || !enrolled) return -1;
+    if (frame->descriptors.empty() || enrolled->descriptors.rows < 2) return 0;
     try {
         std::vector<std::vector<cv::DMatch>> points;
         auto bfm = cv::BFMatcher::create();
         bfm->knnMatch(frame->descriptors, enrolled->descriptors, points, 2);
         std::set<match> matches_unique;
-        int nb_matched = 0;
+
         for (const auto& pts : points) {
             if (pts.size() < 2) {
                 continue;
@@ -145,10 +166,10 @@ int sigfm_match_score(SigfmImgInfo* frame, SigfmImgInfo* enrolled)
                 matches_unique.emplace(
                     match{frame->keypoints.at(match_1.queryIdx).pt,
                           enrolled->keypoints.at(match_1.trainIdx).pt});
-                nb_matched++;
+
             }
         }
-        if (nb_matched < min_match) {
+        if (matches_unique.size() < min_match) {
             return 0;
         }
         std::vector<match> matches{matches_unique.begin(),
@@ -160,14 +181,15 @@ int sigfm_match_score(SigfmImgInfo* frame, SigfmImgInfo* enrolled)
             for (std::size_t k = j + 1; k < matches.size(); k++) {
                 match match_2 = matches[k];
 
-                int vec_1[2] = {match_1.p1.x - match_2.p1.x,
-                                match_1.p1.y - match_2.p1.y};
-                int vec_2[2] = {match_1.p2.x - match_2.p2.x,
-                                match_1.p2.y - match_2.p2.y};
+                double vec_1[2] = {double(match_1.p1.x) - match_2.p1.x,
+                                double(match_1.p1.y) - match_2.p1.y};
+                double vec_2[2] = {double(match_1.p2.x) - match_2.p2.x,
+                                double(match_1.p2.y) - match_2.p2.y};
 
                 double length_1 = sqrt(pow(vec_1[0], 2) + pow(vec_1[1], 2));
                 double length_2 = sqrt(pow(vec_2[0], 2) + pow(vec_2[1], 2));
 
+                if (length_1 == 0 || length_2 == 0) continue;
                 if (1 - std::min(length_1, length_2) /
                             std::max(length_1, length_2) <=
                     length_match) {
@@ -175,10 +197,10 @@ int sigfm_match_score(SigfmImgInfo* frame, SigfmImgInfo* enrolled)
                     double product = length_1 * length_2;
                     angles.emplace_back(angle(
                         M_PI / 2 +
-                            asin((vec_1[0] * vec_2[0] + vec_1[1] * vec_2[1]) /
-                                 product),
-                        acos((vec_1[0] * vec_2[1] - vec_1[1] * vec_2[0]) /
-                             product),
+                            asin(std::clamp((vec_1[0] * vec_2[0] + vec_1[1] * vec_2[1]) /
+                                 product, -1.0, 1.0)),
+                        acos(std::clamp((vec_1[0] * vec_2[1] - vec_1[1] * vec_2[0]) /
+                             product, -1.0, 1.0)),
                         match_1, match_2));
                 }
             }
@@ -194,13 +216,10 @@ int sigfm_match_score(SigfmImgInfo* frame, SigfmImgInfo* enrolled)
             for (std::size_t k = j + 1; k < angles.size(); k++) {
                 angle angle_2 = angles[k];
 
-                if (1 - std::min(angle_1.sin, angle_2.sin) /
-                                std::max(angle_1.sin, angle_2.sin) <=
-                        angle_match &&
-                    1 - std::min(angle_1.cos, angle_2.cos) /
-                                std::max(angle_1.cos, angle_2.cos) <=
-                        angle_match) {
+                if (angle_close(angle_1.sin, angle_2.sin) &&
+                    angle_close(angle_1.cos, angle_2.cos)) {
 
+                    if (count == std::numeric_limits<int>::max()) return count;
                     count += 1;
                 }
             }

@@ -141,3 +141,128 @@ FpImage *fpi_image_resize(FpImage *orig_img, guint w_factor, guint h_factor) {
   return g_object_ref(orig_img);
 #endif
 }
+
+/* Optional SIGFM matcher features. Internal: they are not part of the public
+ * API, so they live here with the other fpi_ image helpers. */
+
+static void
+free_sigfm_info (gpointer data)
+{
+  sigfm_free_info (data);
+}
+
+typedef struct
+{
+  SigfmImgInfo        * sigfm_info;
+  guchar            * image;
+  gint                width;
+  gint                height;
+  GAsyncReadyCallback user_cb;
+} ExtractSfmData;
+
+static void
+fp_image_sigfm_extract_free (gpointer user_data)
+{
+  ExtractSfmData *data = user_data;
+  g_clear_pointer (&data->image, g_free);
+  g_clear_pointer (&data->sigfm_info, free_sigfm_info);
+  g_free (data);
+}
+
+static void
+fp_image_sigfm_extract_cb (GObject * source_object, GAsyncResult * res,
+                         gpointer user_data)
+{
+  GTask * task = G_TASK (res);
+  FpImage * image;
+  ExtractSfmData * data = g_task_get_task_data (task);
+
+  if (!g_task_had_error (task))
+    {
+      image = FP_IMAGE (source_object);
+
+      g_clear_pointer (&image->data, g_free);
+      image->data = g_steal_pointer (&data->image);
+      g_clear_pointer (&image->sigfm_info, free_sigfm_info);
+      image->sigfm_info = g_steal_pointer (&data->sigfm_info);
+    }
+
+  if (data->user_cb)
+    data->user_cb (source_object, res, user_data);
+}
+
+static void
+fp_image_sigfm_extract_thread_func (GTask * task, void * src_obj,
+                                  void * task_data,
+                                  GCancellable * cancellable)
+{
+  ExtractSfmData * data = task_data;
+  GTimer * timer = g_timer_new ();
+
+  data->sigfm_info = sigfm_extract (data->image, data->width, data->height);
+  g_timer_stop (timer);
+  fp_dbg ("sigfm extract completed in %f secs", g_timer_elapsed (timer, NULL));
+  g_timer_destroy (timer);
+  if (!data->sigfm_info)
+    {
+      g_task_return_new_error (task, G_IO_ERROR,
+                               HAVE_SIGFM ? G_IO_ERROR_FAILED : G_IO_ERROR_NOT_SUPPORTED,
+                               HAVE_SIGFM ? "SIGFM extraction failed" : "SIGFM support is disabled in this build");
+      g_object_unref (task);
+      return;
+    }
+  if (sigfm_keypoints_count (data->sigfm_info) == 0)
+    {
+      g_task_return_new_error (task, G_IO_ERROR, G_IO_ERROR_FAILED,
+                               "No keypoints found");
+      g_object_unref (task);
+      return;
+    }
+  g_task_return_boolean (task, TRUE);
+  g_object_unref (task);
+}
+
+/**
+ * fpi_image_get_sigfm_info:
+ * @self: A #FpImage
+ *
+ * Gets the experimental SIGFM features owned by the image. The caller must
+ * not free or modify them. Extracting features again replaces this data.
+ *
+ * Returns: (transfer none) (nullable): The features, or %NULL before extraction
+ */
+SigfmImgInfo *
+fpi_image_get_sigfm_info (FpImage * self)
+{
+  return self->sigfm_info;
+}
+
+/**
+ * fpi_image_extract_sigfm_info:
+ * @self: A #FpImage
+ * @cancellable: (nullable): A #GCancellable
+ * @callback: Callback invoked when feature extraction finishes
+ * @user_data: Data passed to @callback
+ *
+ * Extracts experimental SIGFM features. Complete the operation with
+ * fp_image_detect_minutiae_finish(). Internal to libfprint: the features are
+ * not part of the public API.
+ */
+void
+fpi_image_extract_sigfm_info (FpImage * self, GCancellable * cancellable,
+                           GAsyncReadyCallback callback, gpointer user_data)
+{
+  GTask * task;
+  ExtractSfmData * data = g_new0 (ExtractSfmData, 1);
+
+  task = g_task_new (self, cancellable, fp_image_sigfm_extract_cb, user_data);
+
+  data->image = g_malloc (self->width * self->height);
+  memcpy (data->image, self->data, self->width * self->height);
+  data->width = self->width;
+  data->height = self->height;
+  data->user_cb = callback;
+
+  g_task_set_task_data (task, data, fp_image_sigfm_extract_free);
+  g_task_run_in_thread (task, fp_image_sigfm_extract_thread_func);
+}

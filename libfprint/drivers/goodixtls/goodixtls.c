@@ -17,185 +17,157 @@
 // License along with this library; if not, write to the Free Software
 // Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 
-#include <arpa/inet.h>
-#include <errno.h>
-#include <glib.h>
-#include <netinet/in.h>
-#include <openssl/crypto.h>
-#include <openssl/err.h>
-#include <openssl/ssl.h>
-#include <openssl/tls1.h>
-#include <poll.h>
-#include <pthread.h>
-#include <signal.h>
-#include <string.h>
-#include <sys/socket.h>
-
-#include "drivers_api.h"
-#include "fp-device.h"
-#include "fpi-device.h"
-#include "glibconfig.h"
-#include "goodix.h"
 #include "goodixtls.h"
 
-static GError *
-err_from_ssl (void)
+#include <openssl/err.h>
+#include <string.h>
+
+static void
+set_tls_error (GError **error, const char *operation, int ssl_error)
 {
-  GError *err = malloc (sizeof (GError));
-  unsigned long code = ERR_get_error ();
+  unsigned long code = ERR_peek_last_error ();
+  const char *reason = code ? ERR_reason_error_string (code) : NULL;
 
-  err->code = code;
-  const char *msg = ERR_reason_error_string (code);
-
-  err->message = malloc (strlen (msg));
-  strcpy (err->message, msg);
-  return err;
+  g_set_error (error, G_IO_ERROR, G_IO_ERROR_FAILED,
+               "%s failed (SSL error %d): %s", operation, ssl_error,
+               reason ? reason : "connection closed or invalid TLS data");
 }
 
 static unsigned int
-tls_server_psk_server_callback (SSL           *ssl,
-                                const char    *identity,
-                                unsigned char *psk,
-                                unsigned int   max_psk_len)
+tls_server_psk_callback (SSL *ssl, const char *identity,
+                         unsigned char *psk, unsigned int max_psk_len)
 {
-  if (sizeof (goodix_511_psk_0) > max_psk_len)
-    {
-      fp_dbg ("Provided PSK R is too long for OpenSSL");
-      return 0;
-    }
-  fp_dbg ("PSK WANTED %d", max_psk_len);
-  // I don't know why we must use OPENSSL_hexstr2buf but just copying zeros
-  // doesn't work
-  const char *buff = "000000000000000000000000000000000000000000000000000000000"
-                     "0000000";
-  long len = 0;
-  unsigned char *key = OPENSSL_hexstr2buf (buff, &len);
-  memcpy (psk, key, len);
-  OPENSSL_free (key);
-
-  return len;
-}
-
-static SSL_CTX *
-tls_server_create_ctx (void)
-{
-  const SSL_METHOD *method;
-
-  method = TLS_server_method ();
-
-  SSL_CTX *ctx = SSL_CTX_new (method);
-
-    return ctx;
-}
-
-static void tls_server_config_ctx(SSL_CTX* ctx)
-{
-    SSL_CTX_set_ecdh_auto(ctx, 1);
-    SSL_CTX_set_dh_auto(ctx, 1);
-    /* Match the working `openssl s_server -cipher PSK:@SECLEVEL=0 -tls1_2`:
-     * OpenSSL 3.x default security level (2) disables the old Goodix PSK
-     * ciphers, so the handshake picks a cipher the device tolerates but won't
-     * stream image data over (it answers get_image with 0xd0). Force PSK
-     * ciphers at security level 0. */
-    SSL_CTX_set_security_level(ctx, 0);
-    SSL_CTX_set_cipher_list(ctx, "PSK:@SECLEVEL=0");
-    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
-    SSL_CTX_set_max_proto_version(ctx, TLS1_2_VERSION);
-    SSL_CTX_set_psk_server_callback(ctx, tls_server_psk_server_callback);
-}
-
-int goodix_tls_client_send(GoodixTlsServer* self, guint8* data, guint16 length)
-{
-    return write(self->client_fd, data, length * sizeof(guint8));
-}
-int goodix_tls_client_recv(GoodixTlsServer* self, guint8* data, guint16 length) {
-    return read(self->client_fd, data, length * sizeof(guint8));
-}
-
-int goodix_tls_server_receive(GoodixTlsServer* self, guint8* data,
-                              guint32 length, GError** error)
-{
-    int retr = SSL_read(self->ssl_layer, data, length * sizeof(guint8));
-    if (retr <= 0) {
-        *error = err_from_ssl();
-    }
-    return retr;
-}
-
-static void tls_config_ssl(SSL* ssl)
-{
-    SSL_set_min_proto_version(ssl, TLS1_2_VERSION);
-    SSL_set_max_proto_version(ssl, TLS1_2_VERSION);
-    SSL_set_psk_server_callback(ssl, tls_server_psk_server_callback);
-    SSL_set_security_level(ssl, 0);
-    SSL_set_cipher_list(ssl, "PSK:@SECLEVEL=0");
-}
-
-
-static void *
-goodix_tls_init_serve (void *me)
-{
-  GoodixTlsServer *self = me;
-
-  fp_dbg ("TLS server waiting to accept...");
-  int retr = SSL_accept (self->ssl_layer);
-
-  fp_dbg ("TLS server accept done");
-  if (retr <= 0)
-    self->connection_callback (self, err_from_ssl (), self->user_data);
-  else
-    self->connection_callback (self, NULL, self->user_data);
-  return NULL;
+  /* The provisioned white-box key corresponds to a 32-byte zero PSK. */
+  if (max_psk_len < 32)
+    return 0;
+  memset (psk, 0, 32);
+  return 32;
 }
 
 gboolean
 goodix_tls_server_deinit (GoodixTlsServer *self, GError **error)
 {
-  SSL_shutdown (self->ssl_layer);
-  SSL_free (self->ssl_layer);
-
-  close (self->client_fd);
-  close (self->sock_fd);
-
-  SSL_CTX_free (self->ssl_ctx);
-
+  /* No SSL_shutdown: the USB sleep/reset command ends the sensor session.
+   * Waiting for close_notify here would hang when the sensor has gone away. */
+  g_clear_pointer (&self->ssl_layer, SSL_free);
+  g_clear_pointer (&self->ssl_ctx, SSL_CTX_free);
   return TRUE;
 }
 
 gboolean
 goodix_tls_server_init (GoodixTlsServer *self, GError **error)
 {
-  g_assert (self->connection_callback);
-  SSL_load_error_strings ();
-  OpenSSL_add_ssl_algorithms ();
-  SSL_library_init ();
-  self->ssl_ctx = tls_server_create_ctx ();
-  tls_server_config_ctx (self->ssl_ctx);
+  BIO *input = NULL;
+  BIO *output = NULL;
 
-  int socks[2] = {0, 0};
-  if (socketpair (AF_UNIX, SOCK_STREAM, 0, socks) != 0)
-    {
-      g_set_error (error, G_FILE_ERROR, errno,
-                   "failed to create socket pair: %s", strerror (errno));
-      return FALSE;
-    }
-  self->sock_fd = socks[0];
-  self->client_fd = socks[1];
+  ERR_clear_error ();
+  self->ssl_ctx = SSL_CTX_new (TLS_server_method ());
+  if (!self->ssl_ctx)
+    goto fail;
 
-  if (self->ssl_ctx == NULL)
-    {
-      fp_dbg ("Unable to create TLS server context\n");
-      *error = fpi_device_error_new_msg (FP_DEVICE_ERROR_GENERAL, "Unable to "
-                                                                  "create TLS "
-                                                                  "server "
-                                                                  "context");
-      return FALSE;
-    }
+  /* Keep the cipher policy required by the GF3206 firmware, scoped to this
+   * USB transport. The device supports TLS 1.2 with legacy PSK ciphers. */
+  SSL_CTX_set_security_level (self->ssl_ctx, 0);
+  SSL_CTX_set_dh_auto (self->ssl_ctx, 1);
+  SSL_CTX_set_psk_server_callback (self->ssl_ctx, tls_server_psk_callback);
+  if (!SSL_CTX_set_cipher_list (self->ssl_ctx, "PSK:@SECLEVEL=0") ||
+      !SSL_CTX_set_min_proto_version (self->ssl_ctx, TLS1_2_VERSION) ||
+      !SSL_CTX_set_max_proto_version (self->ssl_ctx, TLS1_2_VERSION))
+    goto fail;
+
   self->ssl_layer = SSL_new (self->ssl_ctx);
-  tls_config_ssl (self->ssl_layer);
-  SSL_set_fd (self->ssl_layer, self->sock_fd);
+  input = BIO_new (BIO_s_mem ());
+  output = BIO_new (BIO_s_mem ());
+  if (!self->ssl_layer || !input || !output)
+    goto fail;
 
-  pthread_create (&self->serve_thread, 0, goodix_tls_init_serve, self);
-
+  BIO_set_mem_eof_return (input, -1);
+  BIO_set_mem_eof_return (output, -1);
+  SSL_set_bio (self->ssl_layer, input, output); /* transfers both BIOs */
+  SSL_set_accept_state (self->ssl_layer);
   return TRUE;
+
+fail:
+  set_tls_error (error, "TLS initialization", SSL_ERROR_SSL);
+  BIO_free (input);
+  BIO_free (output);
+  goodix_tls_server_deinit (self, NULL);
+  return FALSE;
+}
+
+int
+goodix_tls_client_send (GoodixTlsServer *self, const guint8 *data, guint16 length)
+{
+  return BIO_write (SSL_get_rbio (self->ssl_layer), data, length);
+}
+
+int
+goodix_tls_client_recv (GoodixTlsServer *self, guint8 *data, guint16 length)
+{
+  BIO *output = SSL_get_wbio (self->ssl_layer);
+
+  if (!BIO_ctrl_pending (output))
+    return 0;
+  return BIO_read (output, data, length);
+}
+
+gboolean
+goodix_tls_server_handshake (GoodixTlsServer *self,
+                             gboolean *complete, GError **error)
+{
+  int result;
+  int ssl_error;
+
+  *complete = FALSE;
+  ERR_clear_error ();
+  result = SSL_do_handshake (self->ssl_layer);
+  if (result == 1)
+    {
+      *complete = TRUE;
+      return TRUE;
+    }
+
+  ssl_error = SSL_get_error (self->ssl_layer, result);
+  if (ssl_error == SSL_ERROR_WANT_READ)
+    return TRUE; /* resume when the next USB TLS packet arrives */
+
+  set_tls_error (error, "TLS handshake", ssl_error);
+  return FALSE;
+}
+
+int
+goodix_tls_server_receive (GoodixTlsServer *self, guint8 *data,
+                           guint32 length, GError **error)
+{
+  guint32 total = 0;
+
+  /* A single USB image packet can contain several TLS application records. */
+  while (total < length)
+    {
+      int result;
+      int ssl_error;
+
+      ERR_clear_error ();
+      result = SSL_read (self->ssl_layer, data + total,
+                         MIN (length - total, G_MAXINT));
+      if (result > 0)
+        {
+          total += result;
+          continue;
+        }
+
+      ssl_error = SSL_get_error (self->ssl_layer, result);
+      if (ssl_error == SSL_ERROR_WANT_READ)
+        {
+          if (total)
+            return total;
+          g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_PARTIAL_INPUT,
+                               "Incomplete TLS image record");
+        }
+      else
+        set_tls_error (error, "TLS image read", ssl_error);
+      return -1;
+    }
+
+  return total;
 }

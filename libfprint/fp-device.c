@@ -221,7 +221,9 @@ fp_device_finalize (GObject *object)
 
   g_clear_pointer (&priv->temp_timeout, g_source_destroy);
 
-  g_slist_free_full (priv->sources, (GDestroyNotify) g_source_destroy);
+  /* Destroying a timeout removes it from priv->sources in timeout_finalize.
+   * Detach the list first so that removal cannot free the node a second time. */
+  g_slist_free_full (g_steal_pointer (&priv->sources), (GDestroyNotify) g_source_destroy);
 
   g_clear_pointer (&priv->current_idle_cancel_source, g_source_destroy);
   g_clear_pointer (&priv->current_task_idle_return_source, g_source_destroy);
@@ -483,6 +485,11 @@ fp_device_class_init (FpDeviceClass *klass)
                          NULL,
                          G_PARAM_STATIC_STRINGS | G_PARAM_READABLE);
 
+  /**
+   * FpDevice:open: (getter is_open)
+   *
+   * Whether the device is currently open.
+   */
   properties[PROP_OPEN] =
     g_param_spec_boolean ("open",
                           "Opened",
@@ -1103,8 +1110,8 @@ enroll_data_free (FpEnrollData *data)
  * @device: a #FpDevice
  * @template_print: (transfer floating): a #FpPrint
  * @cancellable: (nullable): a #GCancellable, or %NULL
- * @progress_cb: (nullable) (scope notified): progress reporting callback
- * @progress_data: (closure progress_cb): user data for @progress_cb
+ * @progress_cb: (nullable) (scope notified) (closure progress_data): progress reporting callback
+ * @progress_data: user data for @progress_cb
  * @progress_destroy: (destroy progress_data): Destroy notify for @progress_data
  * @callback: (scope async): the function to call on completion
  * @user_data: the data to pass to @callback
@@ -1248,8 +1255,8 @@ match_data_free (FpMatchData *data)
  * @device: a #FpDevice
  * @enrolled_print: a #FpPrint to verify
  * @cancellable: (nullable): a #GCancellable, or %NULL
- * @match_cb: (nullable) (scope notified): match reporting callback
- * @match_data: (closure match_cb): user data for @match_cb
+ * @match_cb: (nullable) (scope notified) (closure match_data): match reporting callback
+ * @match_data: user data for @match_cb
  * @match_destroy: (destroy match_data): Destroy notify for @match_data
  * @callback: the function to call on completion
  * @user_data: the data to pass to @callback
@@ -1374,8 +1381,8 @@ fp_device_verify_finish (FpDevice     *device,
  * @device: a #FpDevice
  * @prints: (element-type FpPrint) (transfer none): #GPtrArray of #FpPrint
  * @cancellable: (nullable): a #GCancellable, or %NULL
- * @match_cb: (nullable) (scope notified): match reporting callback
- * @match_data: (closure match_cb): user data for @match_cb
+ * @match_cb: (nullable) (scope notified) (closure match_data): match reporting callback
+ * @match_data: user data for @match_cb
  * @match_destroy: (destroy match_data): Destroy notify for @match_data
  * @callback: the function to call on completion
  * @user_data: the data to pass to @callback
@@ -1908,7 +1915,7 @@ fp_device_close_sync (FpDevice     *device,
  * @template_print: (transfer floating): A #FpPrint to fill in or use
  *   as a template.
  * @cancellable: (nullable): a #GCancellable, or %NULL
- * @progress_cb: (nullable) (scope call): progress reporting callback
+ * @progress_cb: (nullable) (scope call) (closure progress_data): progress reporting callback
  * @progress_data: user data for @progress_cb
  * @error: Return location for errors, or %NULL to ignore
  *
@@ -1943,8 +1950,8 @@ fp_device_enroll_sync (FpDevice        *device,
  * @device: a #FpDevice
  * @enrolled_print: a #FpPrint to verify
  * @cancellable: (nullable): a #GCancellable, or %NULL
- * @match_cb: (nullable) (scope call): match reporting callback
- * @match_data: (closure match_cb): user data for @match_cb
+ * @match_cb: (nullable) (scope call) (closure match_data): match reporting callback
+ * @match_data: user data for @match_cb
  * @match: (out): Whether the user presented the correct finger
  * @print: (out) (transfer full) (nullable): Location to store the scanned print, or %NULL to ignore
  * @error: Return location for errors, or %NULL to ignore
@@ -1983,8 +1990,8 @@ fp_device_verify_sync (FpDevice     *device,
  * @device: a #FpDevice
  * @prints: (element-type FpPrint) (transfer none): #GPtrArray of #FpPrint
  * @cancellable: (nullable): a #GCancellable, or %NULL
- * @match_cb: (nullable) (scope call): match reporting callback
- * @match_data: (closure match_cb): user data for @match_cb
+ * @match_cb: (nullable) (scope call) (closure match_data): match reporting callback
+ * @match_data: user data for @match_cb
  * @match: (out) (transfer full) (nullable): Location for the matched #FpPrint, or %NULL
  * @print: (out) (transfer full) (nullable): Location for the new #FpPrint, or %NULL
  * @error: Return location for errors, or %NULL to ignore

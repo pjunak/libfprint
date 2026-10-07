@@ -112,8 +112,10 @@ static const FpIdEntry whitelist_id_table[] = {
   { .vid = 0x27c6, .pid = 0x550a },
   { .vid = 0x27c6, .pid = 0x550c },
   { .vid = 0x27c6, .pid = 0x5584 },
-  { .vid = 0x27c6, .pid = 0x55a2 },
+  /* 0x55a2 is driven by goodixtls55x4. These relatives need their own
+   * validated firmware profiles. */
   { .vid = 0x27c6, .pid = 0x55a4 },
+  { .vid = 0x27c6, .pid = 0x55b4 },
   { .vid = 0x27c6, .pid = 0x5740 },
   { .vid = 0x27c6, .pid = 0x5e0a },
   { .vid = 0x27c6, .pid = 0x581a },

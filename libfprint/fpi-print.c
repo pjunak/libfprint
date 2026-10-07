@@ -20,6 +20,7 @@
 
 #include "fpi-print.h"
 #include "sigfm/sigfm.hpp"
+#include "fpi-image.h"
 #define FP_COMPONENT "print"
 #include "fpi-log.h"
 
@@ -58,6 +59,7 @@ void fpi_print_add_print(FpPrint *print, FpPrint *add) {
       print->type == FPI_PRINT_NBIS
           ? g_memdup(add->prints->pdata[0], sizeof(struct xyt_struct))
           : (void *)sigfm_copy_info(add->prints->pdata[0]);
+  g_return_if_fail (to_add != NULL);
   g_ptr_array_add(print->prints, to_add);
 }
 
@@ -186,8 +188,19 @@ fpi_print_add_from_image (FpPrint *print,
     }
   else if (print->type == FPI_PRINT_SIGFM)
     {
-      SigfmImgInfo * info = fp_image_get_sigfm_info (image);
-      g_ptr_array_add (print->prints, info);
+      SigfmImgInfo * info = fpi_image_get_sigfm_info (image);
+      if (!info)
+        {
+          g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
+                               "No SIGFM features found in image or not yet extracted");
+          return FALSE;
+        }
+      SigfmImgInfo *copy = sigfm_copy_info (info);
+      if (!copy) {
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "SIGFM feature copy failed");
+        return FALSE;
+      }
+      g_ptr_array_add (print->prints, copy);
     }
 
   g_clear_object (&print->image);

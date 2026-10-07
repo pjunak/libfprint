@@ -78,8 +78,9 @@ fpi_ssm_test_data_unref (FpiSsmTestData *data)
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (FpiSsmTestData, fpi_ssm_test_data_unref)
 
 static void
-fpi_ssm_test_data_unref_by_ssm (FpiSsmTestData *data)
+fpi_ssm_test_data_unref_by_ssm (gpointer user_data)
 {
+  FpiSsmTestData *data = user_data;
   data->ssm_destroyed = TRUE;
 
   fpi_ssm_test_data_unref (data);
@@ -137,7 +138,7 @@ ssm_test_new_full (int nr_states, int cleanup_state, const char *name)
   ssm = fpi_ssm_new_full (fake_device, test_ssm_handler, nr_states, cleanup_state, name);
   data = fpi_ssm_test_data_new ();
   data->expected_last_state = nr_states;
-  fpi_ssm_set_data (ssm, data, (GDestroyNotify) fpi_ssm_test_data_unref_by_ssm);
+  fpi_ssm_set_data (ssm, data, fpi_ssm_test_data_unref_by_ssm);
 
   return ssm;
 }

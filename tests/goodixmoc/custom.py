@@ -2,7 +2,11 @@
 
 import traceback
 import sys
+import os
 import gi
+
+if not os.environ.get('UMOCKDEV_DIR'):
+    raise RuntimeError('Run this storage-mutating replay test through umockdev-test.py')
 
 gi.require_version('FPrint', '2.0')
 from gi.repository import FPrint, GLib
@@ -45,6 +49,12 @@ def identify_done(dev, res):
     assert identify_match.equal(identify_print)
 
 # List, enroll, list, verify, identify, delete
+# The recording includes a template-list query during upstream's open path.
+# This fork omits that automatic storage-check/reset path, so issue the same
+# read-only query explicitly and verify the recorded initial state.
+assert d.list_prints_sync() == []
+# The next recorded command explicitly clears the mocked template store.
+d.clear_storage_sync()
 print("enrolling")
 assert d.get_finger_status() == FPrint.FingerStatusFlags.NONE
 p = d.enroll_sync(template, None, enroll_progress, None)

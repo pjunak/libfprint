@@ -79,6 +79,13 @@ gint fpi_mean_sq_diff_norm (const guint8 *buf1,
                             const guint8 *buf2,
                             gint          size);
 
+/* Optional SIGFM matcher features; internal to libfprint. */
+void fpi_image_extract_sigfm_info (FpImage            *self,
+                                   GCancellable       *cancellable,
+                                   GAsyncReadyCallback callback,
+                                   gpointer            user_data);
+SigfmImgInfo *fpi_image_get_sigfm_info (FpImage *self);
+
 FpImage *fpi_image_resize (FpImage *orig,
                            guint    w_factor,
                            guint    h_factor);

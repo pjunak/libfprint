@@ -38,7 +38,7 @@ struct _FpiDeviceGoodixTlsClass
   guint8             ep_out;
 };
 
-typedef struct __attribute__((__packed__)) _GoodixCallbackInfo
+typedef struct _GoodixCallbackInfo
 {
   GCallback callback;
   gpointer user_data;
@@ -91,9 +91,6 @@ typedef void (*GoodixImageCallback)(FpDevice *dev,
                                     gpointer  user_data,
                                     GError   *error);
 
-gchar *data_to_str (guint8 *data,
-                    guint32 length);
-
 // ---- GOODIX RECEIVE SECTION START ----
 
 void goodix_receive_done (FpDevice *dev,
@@ -131,12 +128,6 @@ void goodix_receive_preset_psk_read (FpDevice *dev,
                                      gpointer  user_data,
                                      GError   *error);
 
-void goodix_receive_preset_psk_write (FpDevice *dev,
-                                      guint8   *data,
-                                      guint16   length,
-                                      gpointer  user_data,
-                                      GError   *error);
-
 void goodix_receive_ack (FpDevice *dev,
                          guint8   *data,
                          guint16   length,
@@ -168,24 +159,12 @@ void goodix_receive_timeout_cb (FpDevice *dev,
 void goodix_receive_data (FpDevice *dev);
 
 void goodix_start_read_loop (FpDevice *dev);
+gboolean goodix_cancel_operation (FpDevice *dev);
 // ---- GOODIX RECEIVE SECTION END ----
 
 // -----------------------------------------------------------------------------
 
 // ---- GOODIX SEND SECTION START ----
-
-gboolean goodix_send_data (FpDevice      *dev,
-                           guint8        *data,
-                           guint32        length,
-                           GDestroyNotify free_func,
-                           GError       **error);
-
-gboolean goodix_send_pack (FpDevice      *dev,
-                           guint8         flags,
-                           guint8        *payload,
-                           guint16        length,
-                           GDestroyNotify free_func,
-                           GError       **error);
 
 void goodix_send_protocol (FpDevice         *dev,
                            guint8            cmd,
@@ -201,12 +180,6 @@ void goodix_send_protocol (FpDevice         *dev,
 void goodix_send_nop (FpDevice          *dev,
                       GoodixNoneCallback callback,
                       gpointer           user_data);
-
-void goodix_send_drv_state(FpDevice *dev, GoodixSuccessCallback callback,
-                     gpointer user_data);
-
-void goodix_send_mcu_get_pov_image(FpDevice *dev, GoodixSuccessCallback callback,
-                     gpointer user_data);
 
 void goodix_send_mcu_get_image(FpDevice *dev, GoodixImageCallback callback,
                                gpointer user_data);
@@ -224,13 +197,6 @@ void goodix_send_mcu_switch_to_fdt_up (FpDevice             *dev,
                                        GDestroyNotify        free_func,
                                        GoodixDefaultCallback callback,
                                        gpointer              user_data);
-
-void goodix_send_mcu_switch_to_fdt_up_no_reply (FpDevice             *dev,
-                                                guint8               *mode,
-                                                guint16               length,
-                                                GDestroyNotify        free_func,
-                                                GoodixDefaultCallback callback,
-                                                gpointer              user_data);
 
 void goodix_send_mcu_switch_to_fdt_mode (FpDevice             *dev,
                                          guint8               *mode,
@@ -268,23 +234,12 @@ void goodix_send_write_sensor_register (FpDevice          *dev,
                                         GoodixNoneCallback callback,
                                         gpointer           user_data);
 
-void goodix_send_read_sensor_register (FpDevice             *dev,
-                                       guint16               address,
-                                       guint8                length,
-                                       GoodixDefaultCallback callback,
-                                       gpointer              user_data);
-
 void goodix_send_upload_config_mcu (FpDevice             *dev,
                                     guint8               *config,
                                     guint16               length,
                                     GDestroyNotify        free_func,
                                     GoodixSuccessCallback callback,
                                     gpointer              user_data);
-
-void goodix_send_set_powerdown_scan_frequency (FpDevice             *dev,
-                                               guint16               powerdown_scan_frequency,
-                                               GoodixSuccessCallback callback,
-                                               gpointer              user_data);
 
 void goodix_send_enable_chip (FpDevice          *dev,
                               gboolean           enable,
@@ -313,23 +268,11 @@ void goodix_send_tls_successfully_established (FpDevice          *dev,
                                                GoodixNoneCallback callback,
                                                gpointer           user_data);
 
-void goodix_send_preset_psk_write (FpDevice             *dev,
-                                   guint32               flags,
-                                   guint8               *psk,
-                                   guint16               length,
-                                   GDestroyNotify        free_func,
-                                   GoodixSuccessCallback callback,
-                                   gpointer              user_data);
-
 void goodix_send_preset_psk_read (FpDevice                   *dev,
                                   guint32                     flags,
                                   guint16                     length,
                                   GoodixPresetPskReadCallback callback,
                                   gpointer                    user_data);
-
-void goodix_send_read_otp (FpDevice             *dev,
-                           GoodixDefaultCallback callback,
-                           gpointer              user_data);
 
 // ---- GOODIX SEND SECTION END ----
 
@@ -346,6 +289,14 @@ gboolean goodix_dev_deinit (FpDevice *dev,
 void goodix_reset_state (FpDevice *dev);
 void goodix_cancel_receive(FpDevice *dev);
 
+/* TRUE until the callback of the last submitted IN transfer has run. */
+gboolean goodix_read_pending (FpDevice *dev);
+
+/* Release the interface, reset the USB port and claim it again. Call only
+ * with no transfer pending; the caller must reinitialize the sensor. */
+gboolean goodix_reset_usb (FpDevice *dev,
+                           GError  **error);
+
 // ---- DEV SECTION END ----
 
 // -----------------------------------------------------------------------------
@@ -355,13 +306,6 @@ void goodix_cancel_receive(FpDevice *dev);
 void goodix_read_tls (FpDevice         *dev,
                       GoodixTlsCallback callback,
                       gpointer          user_data);
-
-void goodix_tls_run_state (FpiSsm   *ssm,
-                           FpDevice *dev);
-
-void goodix_tls_complete (FpiSsm   *ssm,
-                          FpDevice *dev,
-                          GError   *error);
 
 void goodix_tls (FpDevice          *dev,
                  GoodixNoneCallback callback,
@@ -374,8 +318,6 @@ void goodix_tls_read_image (FpDevice           *dev,
                             GoodixImageCallback callback,
                             gpointer            user_data);
 
-void goodix_tls_decrypt_image (FpDevice *dev,
-                               guint8  **data,
-                               guint16  *len);
-
 // ---- TLS SECTION END ----
+
+void goodix_set_tls_settle_time (FpDevice *dev, guint milliseconds);
