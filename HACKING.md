@@ -2,9 +2,16 @@
 
 ## GLib
 
-Although the library uses GLib internally, libfprint is designed to provide
-a completely neutral interface to its application users. So, the public
-APIs should never return GLib data types.
+The libfprint 2 API uses GObject, GIO asynchronous operations, GCancellable and
+GError. Follow the existing ownership and callback conventions. Keep driver
+state and implementation dependencies (such as OpenCV) out of installed public
+headers. Complete each asynchronous operation exactly once, including on
+cancellation and transport errors.
+
+For this fork, start with the hardware-free commands in [tests/README.md](tests/README.md).
+Keep protocol and lifecycle fixes covered by regression tests. Sensor config,
+matching thresholds and swipe heuristics also need physical-reader validation;
+synthetic tests cannot establish matching accuracy.
 
 ## License clarification
 

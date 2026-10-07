@@ -1,6 +1,9 @@
 libfprint uses the Meson build system. See
-http://mesonbuild.com/Quick-guide.html for details on how to
-compile libfprint.
+https://mesonbuild.com/Quick-guide.html for details on how to compile
+libfprint, and run "meson configure build" to list the available options.
 
-The "meson configure" command will give you a list of available
-command-line options.
+A C compiler is sufficient for the default build. The optional SIGFM matcher
+(-Dsigfm=enabled) additionally needs a C++17 compiler and OpenCV.
+
+To install the Goodix 27c6:55a2 driver alongside your distribution's
+libfprint and set up fingerprint login, follow INSTALL_55a2.md.

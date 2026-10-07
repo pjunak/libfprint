@@ -1,14 +1,6 @@
-This is an experimental libfprint driver implementation for Goodix drivers.
-
-Currently in the works:
-- 27c6:55a2 (supported and tested - enroll + verify working via the goodixtls55x4
-  driver: TLS-PSK capture, swipe assembly with background subtraction + edge-to-edge
-  stacking, NBIS/bozorth matching. fw GF3206_RTSEC_APP_10062.)
-- 27c6:55b4 (supported and tested)
-- 27c6:55a4 (not supported. try at your own risk, it might work or brick your device)
-
-Note: a separate, pre-existing goodixtls511 driver in this branch handles the
-unrelated 27c6:5110 (80x64) sensor; it has nothing to do with the 55xx drivers.
+This is a fork of libfprint with a driver for the Goodix 27c6:55a2
+fingerprint reader. See README.md for its status and documentation, and
+INSTALL_55a2.md for installation. The upstream notices follow.
 
 libfprint
 =========

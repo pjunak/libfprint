@@ -1,121 +1,110 @@
+# libfprint with a Goodix 27c6:55a2 driver
 
+A fork of [libfprint](https://gitlab.freedesktop.org/libfprint/libfprint) 1.94.6
+that drives the **Goodix `27c6:55a2`** fingerprint reader, a small TLS-encrypted
+swipe sensor that upstream libfprint does not support. It works with the normal
+`fprintd` stack: enrollment, verification, the KDE lock screen, `sudo` and polkit
+prompts.
 
-<div align="center">
+> **Status: experimental.** It is used daily on one laptop, but recognition
+> accuracy (false accept/reject rates) has not been measured, and only two
+> firmware versions are supported. Keep password login available.
 
-# LibFPrint
+## What works
 
-*LibFPrint is part of the **[FPrint][Website]** project.*
+| | |
+| --- | --- |
+| Reader | USB `27c6:55a2`, firmware `GF3206_RTSEC_APP_10052` or `GF3206_RTSEC_APP_10062` |
+| fprintd | Enroll (6 swipes), verify, identify, saved prints across reboots |
+| Lock screen | KDE `kde-fingerprint`; the driver reinitializes the reader after suspend and hibernate |
+| sudo, pkexec, run0, KDE admin dialogs | One prompt that accepts the password **or** a finger, whichever comes first ([`pam_fprint_parallel`](doc/PAM_FPRINT_PARALLEL.md)) |
+| Login screen | Password by default (it also unlocks KWallet and GNOME Keyring); fingerprint optional |
 
-<br/>
+Not supported: other Goodix IDs such as `55b4` or `55a4` (they need their own
+validated firmware profiles), other firmware versions, and replacement firmware.
+This repository contains a userspace driver only.
 
-[![Button Website]][Website]
-[![Button Documentation]][Documentation]
+## Install
 
-[![Button Supported]][Supported]
-[![Button Unsupported]][Unsupported]
+On **Arch Linux / CachyOS**, build a package that installs next to the
+distribution's libfprint without replacing it:
 
-[![Button Contribute]][Contribute]
-[![Button Contributors]][Contributors]
+```sh
+python tools/make-source-package.py /tmp/goodix-package
+cd /tmp/goodix-package && makepkg
+sudo pacman -U libfprint-goodix-local-*.pkg.tar.zst
+```
 
-</div>
+Then point fprintd at it, enroll and enable the prompts. The steps, including
+other distributions and rollback, are in **[INSTALL_55a2.md](INSTALL_55a2.md)**.
 
-## This fork: Goodix 27c6:55a2 driver
+## Before you start
 
-This is an experimental libfprint fork adding a working driver for the **Goodix
-`27c6:55a2`** fingerprint sensor (firmware `GF3206_RTSEC_APP_10062`), via the
-`goodixtls55x4` driver.
+- **Sensor key.** The driver expects the reader to be paired with the key used
+  by the Linux community tools. Windows (Windows Hello) has been observed to
+  re-pair it; the driver then reports `Invalid device PSK`. The
+  [restore procedure](INSTALL_55a2.md#invalid-device-psk-after-dual-booting-windows)
+  writes the expected key back.
+- **Swipe, don't press.** Place the finger at one end of the sensor and draw it
+  slowly across the whole length in about a second. Short swipes are rejected.
+- **Accuracy is unmeasured.** Matching uses NBIS with the threshold inherited
+  from earlier forks. [Evaluation tools](doc/GOODIX_VALIDATION.md#offline-recognition-evaluation)
+  exist; results from more readers are welcome.
+- **The sensor link is not secret.** Its TLS key is the public community key,
+  so it gives no protection against someone with physical access to the USB
+  bus. Use the fingerprint for convenience, next to a good password.
+- **Terminal `sudo` by fingerprint** cannot tell which prompt a swipe is meant
+  for ([CVE-2024-37408](https://seclists.org/oss-sec/2024/q2/286)). Only swipe
+  for a command you started.
 
-**Status — enroll + verify working on hardware:** the right finger matches
-(bozorth score ~31–87), other fingers are rejected (≤14, threshold 24).
-Verified end-to-end through `fprintd` + PAM: **KDE screen-unlock and `sudo` by
-fingerprint both work.**
+## Documentation
 
-### 👉 [Installation guide: INSTALL_55a2.md](INSTALL_55a2.md)
+- [INSTALL_55a2.md](INSTALL_55a2.md): installation, PAM setup, troubleshooting, uninstall
+- [doc/GOODIX_55A2_DRIVER.md](doc/GOODIX_55A2_DRIVER.md): how the driver works, recovery behaviour, limits, changes in this fork
+- [doc/PAM_FPRINT_PARALLEL.md](doc/PAM_FPRINT_PARALLEL.md): the combined password/fingerprint PAM module
+- [doc/GOODIX_VALIDATION.md](doc/GOODIX_VALIDATION.md): automated tests, hardware checks, recognition evaluation
+- [tests/README.md](tests/README.md): building and running the test suites
+- [doc/UPSTREAM_MAINTENANCE.md](doc/UPSTREAM_MAINTENANCE.md): relationship to upstream libfprint
 
-Step-by-step build + isolated install + `fprintd`/PAM setup (openSUSE/KDE),
-plus troubleshooting (Windows dual-boot PSK reset, FDT recovery, swipe technique).
+## Building and testing
 
-How it works: TLS-PSK encrypted capture, treats the tiny 56×176 sensor as a
-**swipe** sensor — streams frames during the swipe, per-pixel background
-subtraction against the calibration frame (removes the sensor fixed-pattern),
-keeps only distinct frames and stacks them **edge-to-edge** into a tall,
-minutiae-rich image that NBIS/bozorth matches.
+Needs a C compiler, Meson, Ninja, pkg-config, GLib/GIO, libgusb and OpenSSL.
+Cairo enables the end-to-end capture tests; libpam and libsystemd build the PAM
+module.
 
-Device coverage of this branch's Goodix TLS drivers:
+```sh
+meson setup build -Ddrivers=all -Ddoc=false -Dintrospection=false -Dinstalled-tests=false
+meson compile -C build
+meson test -C build --print-errorlogs
+```
 
-| USB ID | Driver | Status |
-| --- | --- | --- |
-| `27c6:55a2` | `goodixtls55x4` | supported & tested (enroll + verify) |
-| `27c6:55b4` | `goodixtls55x4` | supported & tested (upstream) |
-| `27c6:55a4` | `goodixtls55x4` | unsupported — try at your own risk |
-| `27c6:5110` | `goodixtls511` | unrelated, separate pre-existing driver (80×64) |
+In this fork `-Ddrivers=default` builds `goodixtls55x4`; `all` adds the virtual
+test drivers. Other upstream drivers can be listed by name. The tests need no
+reader: USB is simulated, down to a TLS peer and a scripted fprintd.
 
-> Known follow-ups: FDT (finger-detection) can stop firing after many cycles —
-> a USB `dev.reset()` restores it; fprintd wiring and broader validation are
-> still open.
+## Reporting problems
 
-## History
+Please include:
 
-**LibFPrint** was originally developed as part of an
-academic project at the **[University Of Manchester]**.
+- `python tools/goodix-diagnose.py` (or `goodix-diagnose` from the package): reader, firmware, services, PAM; no biometric data
+- `journalctl -b -u fprintd`; the driver logs why an attempt failed
+- distribution, desktop and login manager
 
-It aimed to hide the differences between consumer
-fingerprint scanners and provide a single uniform
-API to application developers.
+Never attach fingerprint images or enrolled prints.
 
-## Goal
+## Credits
 
-The ultimate goal of the **FPrint** project is to make
-fingerprint scanners widely and easily usable under
-common Linux environments.
+This driver builds on the work of the
+[goodix-fp-linux-dev](https://github.com/goodix-fp-linux-dev) project (Alexander
+Meiler, Matthieu Charette and others), Ash and Natasha England-Elbro (SIGFM and
+Goodix TLS), Alireza S.N. (the 55x4 driver) and RRieger
+([Ravira43/libfprint](https://github.com/Ravira43/libfprint), the first working
+`55a2` enrollment and verification). This fork reworks the driver's lifecycle
+and error recovery, adds tests, Arch packaging and the PAM integration.
 
 ## License
 
-`Section 6` of the license states that for compiled works that use
-this library, such works must include **LibFPrint** copyright notices
-alongside the copyright notices for the other parts of the work.
-
-**LibFPrint** includes code from **NIST's** **[NBIS]** software distribution.
-
-We include **Bozorth3** from the **[US Export Controlled]**
-distribution, which we have determined to be fine
-being shipped in an open source project.
-
-<br/>
-
-<div align="right">
-
-[![Badge License]][License]
-
-</div>
-
-
-<!----------------------------------------------------------------------------->
-
-[Documentation]: https://fprint.freedesktop.org/libfprint-dev/
-[Contributors]: https://gitlab.freedesktop.org/libfprint/libfprint/-/graphs/master
-[Unsupported]: https://gitlab.freedesktop.org/libfprint/wiki/-/wikis/Unsupported-Devices
-[Supported]: https://fprint.freedesktop.org/supported-devices.html
-[Website]: https://fprint.freedesktop.org/
-
-[Contribute]: ./HACKING.md
-[License]: ./COPYING
-
-[University Of Manchester]: https://www.manchester.ac.uk/
-[US Export Controlled]: https://fprint.freedesktop.org/us-export-control.html
-[NBIS]: http://fingerprint.nist.gov/NBIS/index.html
-
-
-<!---------------------------------[ Badges ]---------------------------------->
-
-[Badge License]: https://img.shields.io/badge/License-LGPL2.1-015d93.svg?style=for-the-badge&labelColor=blue
-
-
-<!---------------------------------[ Buttons ]--------------------------------->
-
-[Button Documentation]: https://img.shields.io/badge/Documentation-04ACE6?style=for-the-badge&logoColor=white&logo=BookStack
-[Button Contributors]: https://img.shields.io/badge/Contributors-FF4F8B?style=for-the-badge&logoColor=white&logo=ActiGraph
-[Button Unsupported]: https://img.shields.io/badge/Unsupported_Devices-EF2D5E?style=for-the-badge&logoColor=white&logo=AdBlock
-[Button Contribute]: https://img.shields.io/badge/Contribute-66459B?style=for-the-badge&logoColor=white&logo=Git
-[Button Supported]: https://img.shields.io/badge/Supported_Devices-428813?style=for-the-badge&logoColor=white&logo=AdGuard
-[Button Website]: https://img.shields.io/badge/Homepage-3B80AE?style=for-the-badge&logoColor=white&logo=freedesktopDotOrg
+LGPL 2.1 or later, like libfprint; see [COPYING](COPYING) and [AUTHORS](AUTHORS).
+libfprint includes NIST NBIS code; see [README](README) for the upstream
+notices. libfprint is part of the [fprint project](https://fprint.freedesktop.org/).
+This fork is not an official libfprint release.
