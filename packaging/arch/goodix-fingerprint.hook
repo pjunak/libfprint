@@ -1,0 +1,17 @@
+# Warn when an upgrade invalidates the fingerprint login setup: a changed
+# distribution PAM policy behind a managed override, a sudo .pacnew, or an
+# fprintd that no longer runs against the isolated libfprint. Read-only.
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Path
+Target = usr/lib/pam.d/plasmalogin
+Target = usr/lib/pam.d/polkit-1
+Target = etc/pam.d/sudo
+Target = usr/lib/fprintd
+Target = opt/libfprint-goodix/lib/libfprint-2.so.2.0.0
+
+[Action]
+Description = Checking fingerprint login configuration...
+When = PostTransaction
+Exec = /usr/bin/goodix-fingerprint-pam check
