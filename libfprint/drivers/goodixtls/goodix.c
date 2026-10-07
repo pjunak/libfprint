@@ -995,7 +995,13 @@ goodix_read_tls (FpDevice *dev, GoodixTlsCallback callback,
   FpiDeviceGoodixTls *self = FPI_DEVICE_GOODIXTLS (dev);
   FpiDeviceGoodixTlsPrivate *priv =
     fpi_device_goodixtls_get_instance_private (self);
-  g_assert (!priv->ack && !priv->reply && !priv->timeout);
+  if (priv->ack || priv->reply || priv->timeout)
+    {
+      callback (dev, NULL, 0, user_data,
+                g_error_new_literal (G_IO_ERROR, G_IO_ERROR_PENDING,
+                                     "A Goodix command is still running"));
+      return;
+    }
   priv->generation++;
   priv->callback = callback;
   priv->user_data = user_data;
@@ -1143,8 +1149,18 @@ goodix_tls (FpDevice *dev, GoodixNoneCallback callback, gpointer user_data)
     fpi_device_goodixtls_get_instance_private (FPI_DEVICE_GOODIXTLS (dev));
   GError *error = NULL;
 
-  g_assert (priv->tls_hop == NULL);
-  g_assert (priv->tls_ready_callback == NULL);
+  if (priv->tls_ssm || priv->tls_ready_callback)
+    {
+      callback (dev, user_data, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_PENDING,
+                                                     "A Goodix TLS handshake is already running"));
+      return;
+    }
+  /* A finished session should have been shut down at deactivation. */
+  if (priv->tls_hop)
+    {
+      fp_warn ("Replacing a leftover TLS session");
+      goodix_shutdown_tls (dev, NULL);
+    }
   priv->tls_hop = g_new0 (GoodixTlsServer, 1);
   priv->tls_ready_callback = g_new0 (GoodixCallbackInfo, 1);
   priv->tls_ready_callback->callback = G_CALLBACK (callback);
@@ -1235,8 +1251,10 @@ void
 goodix_tls_read_image (FpDevice *dev, GoodixImageCallback callback,
                        gpointer user_data)
 {
-  g_assert (callback);
-  GoodixCallbackInfo *cb_info = g_new (GoodixCallbackInfo, 1);
+  GoodixCallbackInfo *cb_info;
+
+  g_return_if_fail (callback != NULL);
+  cb_info = g_new (GoodixCallbackInfo, 1);
 
   cb_info->callback = G_CALLBACK (callback);
   cb_info->user_data = user_data;

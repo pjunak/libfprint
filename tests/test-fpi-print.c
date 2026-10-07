@@ -182,6 +182,62 @@ test_disabled_sigfm (void)
 }
 #endif
 
+static FpPrint *
+load_fixture (const gchar *name, gchar **contents, gsize *length)
+{
+  g_autofree gchar *path = g_build_filename (g_getenv ("MESON_SOURCE_ROOT"), "tests", "prints", name, NULL);
+  g_autoptr(GError) error = NULL;
+  FpPrint *print;
+
+  g_assert_true (g_file_get_contents (path, contents, length, &error));
+  print = fp_print_deserialize ((guchar *) *contents, *length, &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (print);
+  return print;
+}
+
+/* Prints enrolled with the published 072991a build must keep loading after
+ * an upgrade. The fixtures are byte-for-byte what that build's
+ * fp_print_serialize() writes (libfprint 1.94's "FP3" format); their minutiae
+ * are synthetic. One carries an enrollment date, one the "no date" marker. */
+static void
+test_published_print_format (void)
+{
+  g_autofree gchar *dated_bytes = NULL;
+  g_autofree gchar *undated_bytes = NULL;
+  g_autofree guchar *saved = NULL;
+  g_autoptr(GError) error = NULL;
+  gsize dated_length, undated_length, saved_length;
+  g_autoptr(FpPrint) dated = load_fixture ("goodix-072991a-nbis.print", &dated_bytes, &dated_length);
+  g_autoptr(FpPrint) undated = load_fixture ("goodix-072991a-nbis-nodate.print", &undated_bytes, &undated_length);
+  const GDate *date;
+  struct xyt_struct *xyt;
+
+  g_assert_cmpstr (fp_print_get_driver (dated), ==, "goodixtls55x4");
+  g_assert_cmpstr (fp_print_get_device_id (dated), ==, "3-3");
+  g_assert_cmpint (fp_print_get_finger (dated), ==, FP_FINGER_RIGHT_INDEX);
+  g_assert_cmpstr (fp_print_get_username (dated), ==, "alice");
+  g_assert_null (fp_print_get_description (dated));
+  g_assert_cmpint (dated->type, ==, FPI_PRINT_NBIS);
+  g_assert_cmpuint (dated->prints->len, ==, 1);
+  xyt = g_ptr_array_index (dated->prints, 0);
+  g_assert_cmpint (xyt->nrows, ==, 4);
+  g_assert_cmpint (xyt->xcol[3], ==, 120);
+  g_assert_cmpint (xyt->ycol[1], ==, 60);
+  g_assert_cmpint (xyt->thetacol[2], ==, 180);
+  date = fp_print_get_enroll_date (dated);
+  g_assert_nonnull (date);
+  g_assert_cmpint (g_date_get_year (date), ==, 2026);
+  g_assert_cmpint (g_date_get_month (date), ==, G_DATE_OCTOBER);
+  g_assert_cmpint (g_date_get_day (date), ==, 7);
+  g_assert_null (fp_print_get_enroll_date (undated));
+
+  /* Saving again produces the same bytes: the format has not drifted. */
+  g_assert_true (fp_print_serialize (dated, &saved, &saved_length, &error));
+  g_assert_no_error (error);
+  g_assert_cmpmem (saved, saved_length, dated_bytes, dated_length);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -202,5 +258,6 @@ main (int argc, char **argv)
 #endif
   g_test_add_func ("/print/invalid-metadata", test_invalid_metadata);
   g_test_add_func ("/print/empty-minutiae", test_empty_minutiae);
+  g_test_add_func ("/print/published-format", test_published_print_format);
   return g_test_run ();
 }

@@ -132,8 +132,16 @@ check_firmware_version (FpDevice *dev, gchar *firmware, gpointer ssm, GError *er
                                            firmware, pid));
       return;
     }
-  g_assert (self->profile->width == GOODIX55X4_WIDTH && self->profile->height == GOODIX55X4_HEIGHT &&
-            self->profile->crop == GOODIX55X4_CROP);
+  /* The image pipeline is built for one geometry; a profile for another
+   * sensor must not reach it. */
+  if (self->profile->width != GOODIX55X4_WIDTH || self->profile->height != GOODIX55X4_HEIGHT ||
+      self->profile->crop != GOODIX55X4_CROP)
+    {
+      fpi_ssm_mark_failed (ssm, g_error_new (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                                           "Goodix firmware '%s' uses an unsupported image geometry",
+                                           firmware));
+      return;
+    }
   goodix_set_tls_settle_time (dev, self->profile->tls_settle_ms);
   fpi_ssm_next_state (ssm);
 }
@@ -498,7 +506,12 @@ schedule_frame (FpDevice *dev, gint state)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
   gint64 elapsed_ms = (g_get_monotonic_time () - self->frame_started) / 1000;
-  g_assert_null (self->delay);
+  /* Exactly one frame timer may be pending. */
+  if (self->delay)
+    {
+      fp_warn ("Replacing a pending frame timer");
+      g_clear_pointer (&self->delay, g_source_destroy);
+    }
   self->delay = fpi_device_add_timeout (dev, MAX (1, CAPTURE_INTERVAL_MS - elapsed_ms),
                                        next_frame, GINT_TO_POINTER (state), NULL);
 }
@@ -703,7 +716,11 @@ scan_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
 static void
 scan_start (FpiDeviceGoodixTls55X4 *self)
 {
-  g_assert_null (self->scan_ssm);
+  if (self->scan_ssm)
+    {
+      fp_warn ("A scan is already running; ignoring a second start");
+      return;
+    }
   goodix_swipe_start (&self->swipe, self->empty_mean);
   self->release_frames = 0;
   self->idle_frames = 0;

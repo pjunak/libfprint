@@ -827,6 +827,38 @@ test_usb_reset_waits_for_read (gconstpointer read_never_finishes)
 }
 
 static void
+read_completion (FpDevice *dev, guint8 *data, guint16 length, gpointer user_data, GError *error)
+{
+  record_completion (FP_IMAGE_DEVICE (dev), error);
+}
+
+static void
+test_busy_tls_requests (void)
+{
+  g_autoptr(FpDevice) dev = new_device ();
+  FpiDeviceGoodixTlsPrivate *priv =
+    fpi_device_goodixtls_get_instance_private (FPI_DEVICE_GOODIXTLS (dev));
+  GoodixCallbackInfo *pending = g_new0 (GoodixCallbackInfo, 1);
+
+  /* A second handshake while one runs is refused, not asserted. */
+  priv->tls_ready_callback = pending;
+  goodix_tls (dev, tls_completion, NULL);
+  g_assert_cmpuint (completions, ==, 1);
+  g_assert_error (reported_error, G_IO_ERROR, G_IO_ERROR_PENDING);
+  g_clear_error (&reported_error);
+  g_assert_true (priv->tls_ready_callback == pending);
+  g_clear_pointer (&priv->tls_ready_callback, g_free);
+
+  /* So is a TLS read while a command waits for its reply. */
+  priv->reply = TRUE;
+  goodix_read_tls (dev, read_completion, NULL);
+  g_assert_cmpuint (completions, ==, 2);
+  g_assert_error (reported_error, G_IO_ERROR, G_IO_ERROR_PENDING);
+  g_clear_error (&reported_error);
+  priv->reply = FALSE;
+}
+
+static void
 write_removable (const gchar *root, const gchar *name, const gchar *value)
 {
   g_autofree gchar *dir = g_build_filename (root, "bus", "usb", "devices", name, NULL);
@@ -1360,6 +1392,7 @@ main (int argc, char **argv)
   g_test_add_data_func ("/goodixtls/driver/usb-reset-read-stuck", GINT_TO_POINTER (1), test_usb_reset_waits_for_read);
   g_test_add_func ("/goodixtls/driver/close-waits-for-read", test_close_waits_for_read);
   g_test_add_func ("/goodixtls/driver/builtin-port-policy", test_builtin_port_policy);
+  g_test_add_func ("/goodixtls/driver/busy-tls-requests", test_busy_tls_requests);
   g_test_add_func ("/goodixtls/driver/transient-scan-retry", test_transient_scan_retry);
   g_test_add_func ("/goodixtls/driver/rebaseline-after-held-finger", test_rebaseline_after_held_finger);
   g_test_add_func ("/goodixtls/driver/idle-rearms-finger-detection", test_idle_rearms_finger_detection);
