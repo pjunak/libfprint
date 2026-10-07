@@ -310,6 +310,7 @@ if get_option('gtk-examples')
 endif
 
 subdir('data')
+subdir('pam')
 subdir('tests')
 
 subdir('examples')

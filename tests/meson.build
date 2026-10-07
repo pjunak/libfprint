@@ -474,3 +474,12 @@ endif
 test('tools', python3, args: files('test-tools.py'), suite: ['unit-tests'],
      depends: tools_test_deps, env: tools_test_env)
 
+# Combined password-or-fingerprint PAM module against a scripted fprintd/logind.
+if pam_parallel_enabled
+    pam_harness = executable('pam-harness', 'pam-harness.c', dependencies: pam_dep)
+    pam_test_env = environment()
+    pam_test_env.set('PAM_PARALLEL_MODULE', pam_fprint_parallel.full_path())
+    pam_test_env.set('PAM_HARNESS', pam_harness.full_path())
+    test('pam-parallel', python3, args: files('test-pam-parallel.py'), suite: ['unit-tests'],
+         depends: [pam_fprint_parallel, pam_harness], env: pam_test_env, timeout: 180)
+endif
