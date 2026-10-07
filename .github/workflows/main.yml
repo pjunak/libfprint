@@ -1,70 +1,158 @@
-name: Build Linux packages
+name: Build and test
+
 on:
   workflow_dispatch:
+  pull_request:
   push:
-    branches:
-      - master
-      - goodixtls
-      - sigfm
+    branches: [master, goodixtls, sigfm]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: nbis-gcc-introspection
+            drivers: all
+            sigfm: disabled
+            cc: gcc
+            cxx: g++
+            introspection: 'true'
+          - name: sigfm-clang
+            drivers: all
+            sigfm: enabled
+            cc: clang
+            cxx: clang++
+            introspection: 'false'
+          - name: virtual-only
+            drivers: virtual_image,virtual_device,virtual_device_storage
+            sigfm: disabled
+            cc: gcc
+            cxx: g++
+            introspection: 'false'
+          - name: shared-helpers
+            drivers: egis0570,aes3500
+            sigfm: disabled
+            cc: gcc
+            cxx: g++
+            introspection: 'false'
+          # Every driver: compiles upstream drivers against the fork's core,
+          # runs their recorded tests and checks data/autosuspend.hwdb.
+          - name: every-driver
+            drivers: upektc_img,vfs5011,vfs7552,aes3500,aes4000,aes1610,aes1660,aes2660,aes2501,aes2550,vfs101,vfs301,vfs0050,etes603,egis0570,vcom5s,synaptics,elan,elanmoc,uru4000,upektc,upeksonly,upekts,goodixmoc,nb1010,fpcmoc,elanspi,goodixtls55x4,virtual_image,virtual_device,virtual_device_storage
+            sigfm: disabled
+            cc: gcc
+            cxx: g++
+            introspection: 'true'
     steps:
-      - uses: nicksnell/action-reset-repo@master
+      - uses: actions/checkout@v7
         with:
-          reset_branch: buildpackage
-          base_branch: master
-          github_token: ${{ github.token }}
-      - name: Merge goodixtls -> buildpackage
-        uses: devmasx/merge-branch@master
-        with:
-          type: now
-          from_branch: goodixtls
-          target_branch: buildpackage
-          github_token: ${{ github.token }}
-      - name: Merge sigfm -> buildpackage
-        uses: devmasx/merge-branch@master
-        with:
-          type: now
-          from_branch: sigfm
-          target_branch: buildpackage
-          github_token: ${{ github.token }}
-      - name: Chown user
-        run: |
-          sudo chown -R $USER:$USER $GITHUB_WORKSPACE
-      - uses: actions/checkout@v3
-        with:
-          ref: buildpackage
-      - uses: actions/setup-python@v1
+          persist-credentials: false
       - name: Install dependencies
-        run: sudo apt-get install -y libgusb-dev libgirepository1.0-dev libnss3-dev libgudev-1.0-dev gtk-doc-tools libopencv-dev doctest-dev
-      - uses: BSFishy/meson-build@v1.0.3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang meson ninja-build pkg-config \
+            libglib2.0-dev libgusb-dev libssl-dev libcairo2-dev libpixman-1-dev \
+            libgirepository1.0-dev python3-gi python3-cairo umockdev libumockdev-dev \
+            libnss3-dev libudev-dev libpam0g-dev libsystemd-dev dbus
+      - name: Install optional matcher dependencies
+        if: matrix.sigfm == 'enabled'
+        run: sudo apt-get install -y libopencv-dev doctest-dev
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+          DRIVERS: ${{ matrix.drivers }}
+          SIGFM: ${{ matrix.sigfm }}
+          INTROSPECTION: ${{ matrix.introspection }}
+        run: >-
+          meson setup build -Ddrivers="$DRIVERS" -Dsigfm="$SIGFM"
+          -Ddoc=false -Dintrospection="$INTROSPECTION" -Dinstalled-tests=false
+      - run: meson compile -C build
+      - run: meson test -C build --print-errorlogs
+      - name: Compile consumers of installed headers
+        run: python3 tools/check-installed-headers.py build
+      - name: Save logs
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          action: build
-          setup-options: --prefix /usr/ --buildtype=release
-          options: --verbose
-          meson-version: 0.63.3
-          ninja-version: 1.10.2
-      - name: Install nFPM
-        run: echo 'deb [trusted=yes] https://repo.goreleaser.com/apt/ /' | sudo tee /etc/apt/sources.list.d/goreleaser.list && sudo apt update && sudo apt install nfpm
-      - name: Prepare nFPM DEB config
-        run: cd /home/runner/work/libfprint/libfprint && cp nfpm_deb_sample.yaml nfpm_deb.yaml && sed -i "s/COMMITID/$(git rev-parse --short HEAD)/g" nfpm_deb.yaml && mkdir ./output && cd /home/runner/work/libfprint/libfprint/build && sed -i "s/LIBVERSION/$(meson introspect --projectinfo | jq -r '.version')/g" /home/runner/work/libfprint/libfprint/nfpm_deb.yaml
-      - name: Prepare nFPM RPM config
-        run: cd /home/runner/work/libfprint/libfprint && cp nfpm_rpm_sample.yaml nfpm_rpm.yaml && sed -i "s/COMMITID/$(git rev-parse --short HEAD)/g" nfpm_rpm.yaml && cd /home/runner/work/libfprint/libfprint/build && sed -i "s/LIBVERSION/$(meson introspect --projectinfo | jq -r '.version')/g" /home/runner/work/libfprint/libfprint/nfpm_rpm.yaml
-      - name: Prepare nFPM Arch config
-        run: cd /home/runner/work/libfprint/libfprint && cp nfpm_arch_sample.yaml nfpm_arch.yaml && sed -i "s/COMMITID/$(git rev-parse --short HEAD)/g" nfpm_arch.yaml && cd /home/runner/work/libfprint/libfprint/build && sed -i "s/LIBVERSION/$(meson introspect --projectinfo | jq -r '.version')/g" /home/runner/work/libfprint/libfprint/nfpm_arch.yaml
-      - name: Generating DEB package
-        run: nfpm pkg --packager deb --config ./nfpm_deb.yaml --target ./output/
-      - name: Generating RPM package
-        run: nfpm pkg --packager rpm --config ./nfpm_rpm.yaml --target ./output/
-      - name: Generating ArchLinux package
-        run: nfpm pkg --packager archlinux --config ./nfpm_arch.yaml --target ./output/
-      - uses: actions/upload-artifact@v3
+          name: logs-${{ matrix.name }}
+          path: build/meson-logs/
+
+  sanitizers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
         with:
-          name: meson-build-artifacts
-          path: /home/runner/work/libfprint/libfprint/build
-      - uses: actions/upload-artifact@v3
+          persist-credentials: false
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y clang meson ninja-build pkg-config \
+            libglib2.0-dev libgusb-dev libssl-dev libcairo2-dev libpixman-1-dev \
+            libpam0g-dev libsystemd-dev dbus python3-gi
+      - name: Configure instrumented library and fuzzers
+        env:
+          CC: clang
+        run: >-
+          meson setup build -Ddrivers=all -Dsigfm=disabled -Ddoc=false
+          -Dintrospection=false -Dinstalled-tests=false -Dfuzzing=true
+          -Db_sanitize=address,undefined -Db_lundef=false -Dc_args=-fsanitize=fuzzer-no-link
+      - run: meson compile -C build
+      - name: Test with leak detection
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: meson test -C build --print-errorlogs
+      - name: Fuzz packet and template readers
+        env:
+          G_DEBUG: fatal-warnings
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          python3 tools/make-fuzz-corpus.py build/corpus
+          build/tests/generate-print-seeds build/corpus/print
+          build/tests/fuzz-goodix build/corpus/goodix -max_total_time=30 -max_len=65539
+          build/tests/fuzz-print build/corpus/print -max_total_time=30 -max_len=65536
+      - name: Save logs and reproducers
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: deb-rpm-arch-packages
-          path: /home/runner/work/libfprint/libfprint/output
+          name: sanitizer-logs
+          path: |
+            build/meson-logs/
+            crash-*
+            leak-*
+            timeout-*
+
+  arch:
+    runs-on: ubuntu-24.04
+    container: archlinux:base-devel
+    timeout-minutes: 20
+    steps:
+      - run: >-
+          pacman -Syu --noconfirm git meson ninja pkgconf glib2 libgusb openssl opencv cairo
+          doctest python python-gobject dbus pam systemd-libs
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: meson setup build -Ddrivers=all -Dsigfm=enabled -Ddoc=false -Dintrospection=false -Dinstalled-tests=false
+      - run: meson compile -C build
+      - run: meson test -C build --print-errorlogs
+      - name: Verify package source and recipe
+        run: |
+          python tools/make-source-package.py /tmp/goodix-package
+          useradd -m builder
+          chown -R builder:builder /tmp/goodix-package
+          su builder -c 'cd /tmp/goodix-package && makepkg --verifysource && makepkg --noconfirm'
+      - name: Save logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: arch-logs
+          path: build/meson-logs/
