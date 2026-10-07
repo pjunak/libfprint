@@ -28,18 +28,22 @@ typedef enum {
 
 /* No USB, timers, environment variables or libfprint completion callbacks.
  * The driver owns the calibration and decides when the user has lifted. */
-typedef struct {
-  GSList *stripes;
-  guint n_stripes, n_frames, static_frames;
+typedef struct
+{
+  GSList  *stripes;
+  guint    n_stripes, n_frames, static_frames;
   gboolean present, moving, have_kept;
-  gint baseline;
-  guint8 previous[GOODIX55X4_OUT_WIDTH * GOODIX55X4_OUT_HEIGHT];
-  guint8 kept[GOODIX55X4_OUT_WIDTH * GOODIX55X4_OUT_HEIGHT];
+  gint     baseline;
+  guint8   previous[GOODIX55X4_OUT_WIDTH * GOODIX55X4_OUT_HEIGHT];
+  guint8   kept[GOODIX55X4_OUT_WIDTH * GOODIX55X4_OUT_HEIGHT];
 } GoodixSwipe;
 
 void goodix_swipe_clear (GoodixSwipe *swipe);
-void goodix_swipe_start (GoodixSwipe *swipe, gint baseline);
-gboolean goodix_swipe_finger_present (GoodixSwipe *swipe, const Goodix55X4Pix *frame);
-GoodixSwipeResult goodix_swipe_feed (GoodixSwipe *swipe, Goodix55X4Pix *frame,
-                                   const Goodix55X4Pix *background);
+void goodix_swipe_start (GoodixSwipe *swipe,
+                         gint         baseline);
+gboolean goodix_swipe_finger_present (GoodixSwipe         *swipe,
+                                      const Goodix55X4Pix *frame);
+GoodixSwipeResult goodix_swipe_feed (GoodixSwipe         *swipe,
+                                     Goodix55X4Pix       *frame,
+                                     const Goodix55X4Pix *background);
 FpImage *goodix_swipe_take_image (GoodixSwipe *swipe);

@@ -62,7 +62,8 @@ typedef struct __attribute__((__packed__)) _GoodixPack
   guint16 length;
 } GoodixPack;
 
-typedef struct __attribute__((__packed__)) _GoodixProtocol {
+typedef struct __attribute__((__packed__)) _GoodixProtocol
+{
   guint8 cmd;
   guint16 length;
 } GoodixProtocol;
@@ -80,21 +81,25 @@ typedef struct __attribute__((__packed__)) _GoodixNop
   guint32 unknown;
 } GoodixNop;
 
-typedef struct __attribute__((__packed__)) _GoodixSetDrvState {
+typedef struct __attribute__((__packed__)) _GoodixSetDrvState
+{
   guint8 unknown;
   guint8 reserved;
 } GoodixSetDrvState;
 
-typedef struct __attribute__((__packed__)) _GoodixMcuSwitchToIdleMode {
+typedef struct __attribute__((__packed__)) _GoodixMcuSwitchToIdleMode
+{
   guint8 sleep_time;
   guint8 reserved;
 } GoodixMcuSwitchToIdleMode;
 
-typedef struct __attribute__((__packed__)) _GoodixSetLed {
+typedef struct __attribute__((__packed__)) _GoodixSetLed
+{
   guint8 state;
 } GoodixSetLed;
 
-typedef struct __attribute__((__packed__)) _GoodixMcuSwitchToSleepModeRealtek {
+typedef struct __attribute__((__packed__)) _GoodixMcuSwitchToSleepModeRealtek
+{
   guint8 value;
 } GoodixMcuSwitchToSleepModeRealtek;
 
@@ -128,7 +133,7 @@ typedef struct __attribute__((__packed__)) _GoodixReset
 {
   guint8 reset_sensor : 1;
   guint8 soft_reset_mcu : 1;
-  guint8 other: 6;
+  guint8 other : 6;
   guint8 sleep_time;
 } GoodixReset;
 
@@ -137,7 +142,8 @@ typedef struct __attribute__((__packed__)) _GoodixQueryMcuState
   guint8 unused_flags;
 } GoodixQueryMcuState;
 
-typedef struct __attribute__((__packed__)) _GoodixPresetPsk {
+typedef struct __attribute__((__packed__)) _GoodixPresetPsk
+{
   guint32 flags;
   guint32 length;
   guint32 offset;
@@ -182,10 +188,13 @@ gboolean goodix_decode_protocol (guint8   *data,
 
 /* Borrowed packet view. 1 = packet, 0 = incomplete/padding, -1 = bad header.
  * consumed includes preceding zero padding; payload remains owned by input. */
-typedef struct {
-  guint8 flags;
+typedef struct
+{
+  guint8        flags;
   const guint8 *payload;
-  guint16 length;
-  gsize consumed;
+  guint16       length;
+  gsize         consumed;
 } GoodixPacket;
-gint goodix_packet_peek (const guint8 *data, gsize length, GoodixPacket *packet);
+gint goodix_packet_peek (const guint8 *data,
+                         gsize         length,
+                         GoodixPacket *packet);

@@ -126,12 +126,14 @@ fp_image_device_start_capture_action (FpDevice * device)
       fpi_device_get_enroll_data (device, &enroll_print);
       g_object_get (enroll_print, "fpi-type", &print_type, NULL);
       if (print_type == FPI_PRINT_UNDEFINED)
-        fpi_print_set_type (enroll_print, priv->algorithm);
+        {
+          fpi_print_set_type (enroll_print, priv->algorithm);
+        }
       else if (print_type != priv->algorithm)
         {
           fpi_device_action_error (device,
-            fpi_device_error_new_msg (FP_DEVICE_ERROR_DATA_INVALID,
-                                     "Enrollment template uses a different matching algorithm"));
+                                   fpi_device_error_new_msg (FP_DEVICE_ERROR_DATA_INVALID,
+                                                             "Enrollment template uses a different matching algorithm"));
           return;
         }
     }

@@ -12,10 +12,25 @@ new_print (FpiPrintType type)
   return print;
 }
 
+/* A stored print: the "FP3" magic followed by the serialized variant. */
+static guint8 *
+print_blob (GVariant *value, gsize *length)
+{
+  g_autoptr(GVariant) owned = g_variant_ref_sink (value);
+  guint8 *blob;
+
+  *length = 3 + g_variant_get_size (owned);
+  blob = g_malloc (*length);
+  memcpy (blob, "FP3", 3);
+  memcpy (blob + 3, g_variant_get_data (owned), *length - 3);
+  return blob;
+}
+
 static FpImage *
 new_sigfm_image (void)
 {
   FpImage *image = fp_image_new (64, 64);
+
   /* Blank synthetic data: tests allocation ownership, not matching accuracy. */
   image->sigfm_info = sigfm_extract (image->data, image->width, image->height);
   g_assert_nonnull (image->sigfm_info);
@@ -26,6 +41,7 @@ static void
 test_print_roundtrip (gconstpointer user_data)
 {
   FpiPrintType type = GPOINTER_TO_INT (user_data);
+
   g_autoptr(FpPrint) print = new_print (type);
   g_autoptr(FpPrint) restored = NULL;
   g_autoptr(GError) error = NULL;
@@ -33,7 +49,9 @@ test_print_roundtrip (gconstpointer user_data)
   gsize length;
 
   if (type == FPI_PRINT_RAW)
-    g_object_set (print, "fpi-data", g_variant_new_string ("synthetic print"), NULL);
+    {
+      g_object_set (print, "fpi-data", g_variant_new_string ("synthetic print"), NULL);
+    }
   else if (type == FPI_PRINT_NBIS)
     {
       struct xyt_struct *xyt = g_new0 (struct xyt_struct, 1);
@@ -97,6 +115,7 @@ static void
 test_short_print (void)
 {
   const guint8 bytes[] = "FP3";
+
   g_autoptr(GError) error = NULL;
   for (guint length = 0; length <= 3; length++)
     {
@@ -110,15 +129,15 @@ static void
 test_wrong_print_schema (gconstpointer user_data)
 {
   g_autoptr(GError) error = NULL;
-  g_autoptr(GVariant) value = g_variant_ref_sink (g_variant_new (
-      "(issbymsmsi@a{sv}v)", GPOINTER_TO_INT (user_data), "test", "0", FALSE,
-      FP_FINGER_UNKNOWN, NULL, NULL, 1,
-      g_variant_new_array (G_VARIANT_TYPE ("{sv}"), NULL, 0),
-      g_variant_new_string ("wrong nested schema")));
-  gsize length = 3 + g_variant_get_size (value);
-  g_autofree guint8 *bytes = g_malloc (length);
-  memcpy (bytes, "FP3", 3);
-  memcpy (bytes + 3, g_variant_get_data (value), length - 3);
+  GVariant *value;
+  gsize length;
+
+  value = g_variant_new ("(issbymsmsi@a{sv}v)",
+                         GPOINTER_TO_INT (user_data), "test", "0", FALSE,
+                         FP_FINGER_UNKNOWN, NULL, NULL, 1,
+                         g_variant_new_array (G_VARIANT_TYPE ("{sv}"), NULL, 0),
+                         g_variant_new_string ("wrong nested schema"));
+  g_autofree guint8 *bytes = print_blob (value, &length);
   g_assert_null (fp_print_deserialize (bytes, length, &error));
   g_assert_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA);
 }
@@ -126,21 +145,24 @@ test_wrong_print_schema (gconstpointer user_data)
 static void
 test_invalid_metadata (void)
 {
-  const struct { guint8 finger; gint date; } cases[] = {{255, 1}, {0, 0}, {0, -1}, {0, G_MAXINT32}};
-  for (guint i = 0; i < G_N_ELEMENTS (cases); i++) {
-    g_autoptr(GVariant) value = g_variant_ref_sink (g_variant_new (
-      "(issbymsmsi@a{sv}v)", FPI_PRINT_RAW, "test", "0", FALSE,
-      cases[i].finger, NULL, NULL, cases[i].date,
-      g_variant_new_array (G_VARIANT_TYPE ("{sv}"), NULL, 0),
-      g_variant_new_variant (g_variant_new_string ("synthetic"))));
-    gsize length = 3 + g_variant_get_size (value);
-    g_autofree guint8 *bytes = g_malloc (length);
-    memcpy (bytes, "FP3", 3);
-    memcpy (bytes + 3, g_variant_get_data (value), length - 3);
-    g_autoptr(GError) error = NULL;
-    g_assert_null (fp_print_deserialize (bytes, length, &error));
-    g_assert_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA);
-  }
+  const struct { guint8 finger;
+                 gint   date;
+  } cases[] = {{255, 1}, {0, 0}, {0, -1}, {0, G_MAXINT32}};
+  for (guint i = 0; i < G_N_ELEMENTS (cases); i++)
+    {
+      g_autoptr(GError) error = NULL;
+      GVariant *value;
+      gsize length;
+
+      value = g_variant_new ("(issbymsmsi@a{sv}v)",
+                             FPI_PRINT_RAW, "test", "0", FALSE,
+                             cases[i].finger, NULL, NULL, cases[i].date,
+                             g_variant_new_array (G_VARIANT_TYPE ("{sv}"), NULL, 0),
+                             g_variant_new_variant (g_variant_new_string ("synthetic")));
+      g_autofree guint8 *bytes = print_blob (value, &length);
+      g_assert_null (fp_print_deserialize (bytes, length, &error));
+      g_assert_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA);
+    }
 }
 
 static void
@@ -167,16 +189,17 @@ test_disabled_sigfm (void)
   g_assert_false (fp_print_serialize (print, &data, &length, &error));
   g_assert_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
   g_clear_error (&error);
-  g_autoptr(GVariant) nested = g_variant_ref_sink (g_variant_new ("(@a(ay))",
-    g_variant_new_array (G_VARIANT_TYPE ("(ay)"), NULL, 0)));
-  g_autoptr(GVariant) value = g_variant_ref_sink (g_variant_new (
-    "(issbymsmsi@a{sv}v)", FPI_PRINT_SIGFM, "test", "0", FALSE,
-    FP_FINGER_UNKNOWN, NULL, NULL, 1,
-    g_variant_new_array (G_VARIANT_TYPE ("{sv}"), NULL, 0), nested));
-  length = 3 + g_variant_get_size (value);
-  data = g_malloc (length);
-  memcpy (data, "FP3", 3);
-  memcpy (data + 3, g_variant_get_data (value), length - 3);
+  g_clear_pointer (&data, g_free);
+
+  /* A stored SIGFM print must be refused, not misread, by this build. */
+  GVariant *nested = g_variant_new ("(@a(ay))",
+                                    g_variant_new_array (G_VARIANT_TYPE ("(ay)"), NULL, 0));
+  GVariant *value = g_variant_new ("(issbymsmsi@a{sv}v)",
+                                   FPI_PRINT_SIGFM, "test", "0", FALSE,
+                                   FP_FINGER_UNKNOWN, NULL, NULL, 1,
+                                   g_variant_new_array (G_VARIANT_TYPE ("{sv}"), NULL, 0),
+                                   nested);
+  data = print_blob (value, &length);
   g_assert_null (fp_print_deserialize (data, length, &error));
   g_assert_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
 }
@@ -186,6 +209,7 @@ static FpPrint *
 load_fixture (const gchar *name, gchar **contents, gsize *length)
 {
   g_autofree gchar *path = g_build_filename (g_getenv ("MESON_SOURCE_ROOT"), "tests", "prints", name, NULL);
+
   g_autoptr(GError) error = NULL;
   FpPrint *print;
 
@@ -206,6 +230,7 @@ test_published_print_format (void)
   g_autofree gchar *dated_bytes = NULL;
   g_autofree gchar *undated_bytes = NULL;
   g_autofree guchar *saved = NULL;
+
   g_autoptr(GError) error = NULL;
   gsize dated_length, undated_length, saved_length;
   g_autoptr(FpPrint) dated = load_fixture ("goodix-072991a-nbis.print", &dated_bytes, &dated_length);

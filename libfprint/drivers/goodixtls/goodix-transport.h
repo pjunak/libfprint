@@ -7,9 +7,14 @@
 #pragma once
 #include "drivers_api.h"
 
-typedef void (*GoodixWriteDone) (FpDevice *device, gpointer data, GError *error);
+typedef void (*GoodixWriteDone) (FpDevice *device,
+                                 gpointer  data,
+                                 GError   *error);
 /* References bytes and cancellable until completion; callback owns the error.
- * Keeps firmware-required 64-byte transfers, with one total write deadline. */
-void goodix_write_async (FpDevice *device, guint8 endpoint, GBytes *bytes,
-                         GCancellable *cancellable, GoodixWriteDone callback,
-                         gpointer user_data);
+* Keeps firmware-required 64-byte transfers, with one total write deadline. */
+void goodix_write_async (FpDevice       *device,
+                         guint8          endpoint,
+                         GBytes         *bytes,
+                         GCancellable   *cancellable,
+                         GoodixWriteDone callback,
+                         gpointer        user_data);

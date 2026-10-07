@@ -15,11 +15,13 @@ capture_write_pgm (const gchar *path, guint width, guint height,
   g_autoptr(GFile) file = g_file_new_for_path (path);
   /* Exclusive creation with mode 0600; do not replace existing files/symlinks. */
   g_autoptr(GFileOutputStream) output = g_file_create (file, G_FILE_CREATE_PRIVATE, NULL, error);
-  if (!output) return FALSE;
+  if (!output)
+    return FALSE;
   g_autofree gchar *header = g_strdup_printf ("P5\n%u %u\n255\n", width, height);
   gboolean success = g_output_stream_write_all (G_OUTPUT_STREAM (output), header, strlen (header), NULL, NULL, error) &&
-    g_output_stream_write_all (G_OUTPUT_STREAM (output), pixels, size, NULL, NULL, error) &&
-    g_output_stream_close (G_OUTPUT_STREAM (output), NULL, error);
-  if (!success) g_file_delete (file, NULL, NULL);
+                     g_output_stream_write_all (G_OUTPUT_STREAM (output), pixels, size, NULL, NULL, error) &&
+                     g_output_stream_close (G_OUTPUT_STREAM (output), NULL, error);
+  if (!success)
+    g_file_delete (file, NULL, NULL);
   return success;
 }

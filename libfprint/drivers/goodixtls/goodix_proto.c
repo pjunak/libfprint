@@ -120,14 +120,19 @@ gint
 goodix_packet_peek (const guint8 *data, gsize length, GoodixPacket *packet)
 {
   gsize offset = 0;
-  *packet = (GoodixPacket) {0};
-  while (offset < length && data[offset] == 0) offset++;
+
+  *packet = (GoodixPacket){0};
+  while (offset < length && data[offset] == 0)
+    offset++;
   packet->consumed = offset;
-  if (length - offset < 4) return 0;
+  if (length - offset < 4)
+    return 0;
   const guint8 *header = data + offset;
-  if ((guint8) (header[0] + header[1] + header[2]) != header[3]) return -1;
+  if ((guint8) (header[0] + header[1] + header[2]) != header[3])
+    return -1;
   guint16 size = header[1] | (header[2] << 8);
-  if (length - offset - 4 < size) return 0;
+  if (length - offset - 4 < size)
+    return 0;
   packet->flags = header[0];
   packet->payload = header + 4;
   packet->length = size;

@@ -674,11 +674,12 @@ fp_print_serialize (FpPrint *print,
   g_assert (length);
   *data = NULL;
   *length = 0;
-  if (print->type == FPI_PRINT_SIGFM && !HAVE_SIGFM) {
-    g_variant_builder_clear (&builder);
-    g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "SIGFM support is disabled in this build");
-    return FALSE;
-  }
+  if (print->type == FPI_PRINT_SIGFM && !HAVE_SIGFM)
+    {
+      g_variant_builder_clear (&builder);
+      g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "SIGFM support is disabled in this build");
+      return FALSE;
+    }
 
   g_variant_builder_add (&builder, "i", print->type);
   g_variant_builder_add (&builder, "s", print->driver);
@@ -743,12 +744,13 @@ fp_print_serialize (FpPrint *print,
           SigfmImgInfo * info = g_ptr_array_index (print->prints, i);
           int slen;
           g_autofree unsigned char *serialized = sigfm_serialize_binary (info, &slen);
-          if (!serialized) {
-            g_variant_builder_clear (&nested);
-            g_variant_builder_clear (&builder);
-            g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "SIGFM serialization failed");
-            return FALSE;
-          }
+          if (!serialized)
+            {
+              g_variant_builder_clear (&nested);
+              g_variant_builder_clear (&builder);
+              g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_FAILED, "SIGFM serialization failed");
+              return FALSE;
+            }
           g_variant_builder_add_value (
             &nested, g_variant_new_fixed_array (G_VARIANT_TYPE_BYTE,
                                                 serialized, slen, 1));

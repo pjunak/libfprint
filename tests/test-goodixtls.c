@@ -6,13 +6,13 @@
 typedef struct
 {
   GoodixTlsServer server;
-  SSL_CTX *ctx;
-  SSL *client;
+  SSL_CTX        *ctx;
+  SSL            *client;
 } TlsPair;
 
 static unsigned int
 client_psk (SSL *ssl, const char *hint, char *identity,
-             unsigned int identity_len, unsigned char *psk, unsigned int psk_len)
+            unsigned int identity_len, unsigned char *psk, unsigned int psk_len)
 {
   g_strlcpy (identity, "test sensor", identity_len);
   g_assert_cmpuint (psk_len, >=, 32);
@@ -90,6 +90,7 @@ static void
 test_handshake (gconstpointer data)
 {
   TlsPair pair = {0};
+
   g_autoptr(GError) error = NULL;
   pair_init (&pair, FALSE);
   g_assert_true (pair_handshake (&pair, GPOINTER_TO_UINT (data), &error));
@@ -101,6 +102,7 @@ static void
 test_wrong_key (void)
 {
   TlsPair pair = {0};
+
   g_autoptr(GError) error = NULL;
   pair_init (&pair, TRUE);
   g_assert_false (pair_handshake (&pair, 8192, &error));
@@ -113,6 +115,7 @@ static void
 test_aborted_handshake (void)
 {
   GoodixTlsServer server = {0};
+
   g_autoptr(GError) error = NULL;
   gboolean complete;
 
@@ -130,6 +133,7 @@ static void
 test_image (gconstpointer data)
 {
   TlsPair pair = {0};
+
   g_autoptr(GError) error = NULL;
   guint8 image[14784], decoded[30000], encrypted[32000];
   gboolean corrupt = GPOINTER_TO_INT (data);

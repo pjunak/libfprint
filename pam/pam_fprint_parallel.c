@@ -72,7 +72,7 @@
 #include <systemd/sd-bus.h>
 #include <systemd/sd-login.h>
 
-#define EXPORT __attribute__ ((visibility ("default")))
+#define EXPORT __attribute__((visibility ("default")))
 
 #define FPRINT_NAME "net.reactivated.Fprint"
 #define FPRINT_MANAGER_PATH "/net/reactivated/Fprint/Manager"
@@ -87,7 +87,10 @@
 #define CLAIM_RETRY_USEC (2 * USEC_PER_SEC)
 #define PASSWORD_MAX 512
 
-typedef enum { MODE_TTY, MODE_CONV } Mode;
+typedef enum {
+  MODE_TTY,
+  MODE_CONV,
+} Mode;
 
 typedef enum {
   FP_OFF,       /* not usable for the rest of this prompt */
@@ -96,62 +99,73 @@ typedef enum {
   FP_LOCKED,    /* released while the session is locked */
 } FpState;
 
-typedef enum { ACT_NONE, ACT_RESTART, ACT_DISARM } Action;
+typedef enum {
+  ACT_NONE,
+  ACT_RESTART,
+  ACT_DISARM,
+} Action;
 
-typedef enum { RES_MATCH, RES_PASSWORD, RES_SIGNAL, RES_CONV_ERROR } Result;
+typedef enum {
+  RES_MATCH,
+  RES_PASSWORD,
+  RES_SIGNAL,
+  RES_CONV_ERROR,
+} Result;
 
 /* Shared with the conversation thread, which may outlive the module call.
  * The eventfd belongs to this struct: writing to it can never raise SIGPIPE,
  * and it is closed only by the last reference. */
-typedef struct {
-  atomic_int refs;
-  int notify_fd;
+typedef struct
+{
+  atomic_int      refs;
+  int             notify_fd;
   struct pam_conv conv;
-  char *prompt;
-  char *answer;
-  int status;
+  char           *prompt;
+  char           *answer;
+  int             status;
 } ConvShared;
 
-typedef struct {
-  pam_handle_t *pamh;
-  const char *user;
-  const char *service;
-  Mode mode;
-  unsigned timeout_s;
-  unsigned max_tries;
-  const char *bus_address;
-  const char *lock_session;
-  bool debug;
-  bool silent;
+typedef struct
+{
+  pam_handle_t  *pamh;
+  const char    *user;
+  const char    *service;
+  Mode           mode;
+  unsigned       timeout_s;
+  unsigned       max_tries;
+  const char    *bus_address;
+  const char    *lock_session;
+  bool           debug;
+  bool           silent;
 
-  sd_bus *bus;
-  char *device;
-  char *fprintd_owner;  /* unique bus name currently owning net.reactivated.Fprint */
-  char *logind_owner;
-  bool swipe;
-  sd_bus_slot *verify_slot;
-  sd_bus_slot *lock_slot;
-  FpState fp;
-  bool claimed;
-  bool verifying;
-  unsigned tries;
-  uint64_t deadline;
-  uint64_t retry_claim_at;
-  bool matched;
-  Action action;
-  bool lock_changed;
-  bool locked;
+  sd_bus        *bus;
+  char          *device;
+  char          *fprintd_owner; /* unique bus name currently owning net.reactivated.Fprint */
+  char          *logind_owner;
+  bool           swipe;
+  sd_bus_slot   *verify_slot;
+  sd_bus_slot   *lock_slot;
+  FpState        fp;
+  bool           claimed;
+  bool           verifying;
+  unsigned       tries;
+  uint64_t       deadline;
+  uint64_t       retry_claim_at;
+  bool           matched;
+  Action         action;
+  bool           lock_changed;
+  bool           locked;
 
-  int tty;
-  bool tty_raw;
+  int            tty;
+  bool           tty_raw;
   struct termios saved_termios;
-  char prompt[256];
-  char password[PASSWORD_MAX + 1];
-  size_t password_len;
+  char           prompt[256];
+  char           password[PASSWORD_MAX + 1];
+  size_t         password_len;
 
-  ConvShared *shared;
-  int notify_read;
-  bool conv_done;
+  ConvShared    *shared;
+  int            notify_read;
+  bool           conv_done;
 } Ctx;
 
 static volatile sig_atomic_t got_signal;
@@ -162,11 +176,14 @@ static uint64_t
 now_usec (void)
 {
   struct timespec ts;
+
   clock_gettime (CLOCK_MONOTONIC, &ts);
   return (uint64_t) ts.tv_sec * USEC_PER_SEC + (uint64_t) ts.tv_nsec / 1000;
 }
 
-static void debug_log (Ctx *c, const char *format, ...) __attribute__ ((format (printf, 2, 3)));
+static void debug_log (Ctx        *c,
+                       const char *format,
+                       ...) __attribute__((format (printf, 2, 3)));
 
 static void
 debug_log (Ctx *c, const char *format, ...)
@@ -186,6 +203,7 @@ static void
 write_all (int fd, const char *text)
 {
   size_t length = strlen (text);
+
   while (length > 0)
     {
       ssize_t written = write (fd, text, length);
@@ -243,6 +261,7 @@ static bool
 sent_by (sd_bus_message *message, const char *owner)
 {
   const char *sender = sd_bus_message_get_sender (message);
+
   return owner && sender && strcmp (sender, owner) == 0;
 }
 
@@ -673,7 +692,9 @@ conv_thread (void *data)
   int status = shared->conv.conv (1, &messages, &response, shared->conv.appdata_ptr);
 
   if (status == PAM_SUCCESS && response && response->resp)
-    shared->answer = response->resp;
+    {
+      shared->answer = response->resp;
+    }
   else if (response && response->resp)
     {
       explicit_bzero (response->resp, strlen (response->resp));
@@ -740,7 +761,9 @@ apply_events (Ctx *c)
 
   c->action = ACT_NONE;
   if (action == ACT_DISARM)
-    fp_off (c);
+    {
+      fp_off (c);
+    }
   else if (action == ACT_RESTART && c->fp == FP_ARMED)
     {
       sd_bus_error error = SD_BUS_ERROR_NULL;
@@ -994,8 +1017,9 @@ pam_sm_authenticate (pam_handle_t *pamh, int flags, int argc, const char **argv)
 
   /* Dialogs (KDE) show this instead of the prompt text. */
   if (c.mode == MODE_CONV)
-    notify (&c, c.swipe ? "Swipe your finger or type your password" :
-                          "Touch the fingerprint reader or type your password");
+    notify (&c, c.swipe ?
+            "Swipe your finger or type your password" :
+            "Touch the fingerprint reader or type your password");
   if (c.mode == MODE_TTY ? !tty_begin (&c) : !conv_begin (&c))
     goto out;
 
@@ -1006,21 +1030,22 @@ pam_sm_authenticate (pam_handle_t *pamh, int flags, int argc, const char **argv)
       pam_syslog (pamh, LOG_INFO, "fingerprint accepted for %s", c.user);
       status = PAM_SUCCESS;
       break;
+
     case RES_PASSWORD:
-      if (c.mode == MODE_TTY)
-        {
-          c.password[c.password_len] = '\0';
-          status = pam_set_item (pamh, PAM_AUTHTOK, c.password) == PAM_SUCCESS ? PAM_IGNORE : PAM_SYSTEM_ERR;
-        }
+      /* Hand the password to pam_unix (try_first_pass) and step aside. */
+      c.password[c.password_len] = '\0';
+      if (pam_set_item (pamh, PAM_AUTHTOK,
+                        c.mode == MODE_TTY ? c.password : c.shared->answer) == PAM_SUCCESS)
+        status = PAM_IGNORE;
       else
-        {
-          status = pam_set_item (pamh, PAM_AUTHTOK, c.shared->answer) == PAM_SUCCESS ? PAM_IGNORE : PAM_SYSTEM_ERR;
-        }
+        status = PAM_SYSTEM_ERR;
       break;
+
     case RES_SIGNAL:
       signo = got_signal;
       status = PAM_CONV_ERR;
       break;
+
     case RES_CONV_ERROR:
       /* shared->status is published by the eventfd handshake; on any other
        * error path the thread may still be running. */

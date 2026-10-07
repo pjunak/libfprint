@@ -41,7 +41,7 @@ struct _FpiDeviceGoodixTlsClass
 typedef struct _GoodixCallbackInfo
 {
   GCallback callback;
-  gpointer user_data;
+  gpointer  user_data;
 } GoodixCallbackInfo;
 
 typedef void (*GoodixCmdCallback)(FpDevice *dev,
@@ -181,8 +181,9 @@ void goodix_send_nop (FpDevice          *dev,
                       GoodixNoneCallback callback,
                       gpointer           user_data);
 
-void goodix_send_mcu_get_image(FpDevice *dev, GoodixImageCallback callback,
-                               gpointer user_data);
+void goodix_send_mcu_get_image (FpDevice           *dev,
+                                GoodixImageCallback callback,
+                                gpointer            user_data);
 
 void goodix_send_mcu_switch_to_fdt_down (FpDevice             *dev,
                                          guint8               *mode,
@@ -220,14 +221,14 @@ void goodix_send_set_led (FpDevice          *dev,
                           gpointer           user_data);
 
 void goodix_send_mcu_switch_to_sleep_mode (FpDevice          *dev,
-                                          guint8             sleep_time,
-                                          GoodixNoneCallback callback,
-                                          gpointer           user_data);
+                                           guint8             sleep_time,
+                                           GoodixNoneCallback callback,
+                                           gpointer           user_data);
 
-void goodix_send_mcu_switch_to_sleep_mode_realtek (FpDevice          *dev,
-                                                guint8             value,
-                                                GoodixSuccessCallback callback,
-                                                gpointer           user_data);
+void goodix_send_mcu_switch_to_sleep_mode_realtek (FpDevice             *dev,
+                                                   guint8                value,
+                                                   GoodixSuccessCallback callback,
+                                                   gpointer              user_data);
 void goodix_send_write_sensor_register (FpDevice          *dev,
                                         guint16            address,
                                         guint16            value,
@@ -287,7 +288,7 @@ gboolean goodix_dev_deinit (FpDevice *dev,
                             GError  **error);
 
 void goodix_reset_state (FpDevice *dev);
-void goodix_cancel_receive(FpDevice *dev);
+void goodix_cancel_receive (FpDevice *dev);
 
 /* TRUE until the callback of the last submitted IN transfer has run. */
 gboolean goodix_read_pending (FpDevice *dev);
@@ -320,4 +321,5 @@ void goodix_tls_read_image (FpDevice           *dev,
 
 // ---- TLS SECTION END ----
 
-void goodix_set_tls_settle_time (FpDevice *dev, guint milliseconds);
+void goodix_set_tls_settle_time (FpDevice *dev,
+                                 guint     milliseconds);

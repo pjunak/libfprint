@@ -34,7 +34,7 @@
 #define CAPTURE_INTERVAL_MS 40
 
 /* Capture errors that a fresh activation can clear are reported as retries
- * during verify/identify, at most this often per open (one PAM attempt). */
+* during verify/identify, at most this often per open (one PAM attempt). */
 #define GOODIX_TRANSIENT_RETRIES 2
 
 /* An empty sensor answers finger-up promptly. A slower answer means a finger
@@ -42,36 +42,37 @@
 #define GOODIX_REBASELINE_AFTER_MS 300
 
 /* Finger detection that fires without contact returns to the low-power wait
- * after two seconds of empty frames instead of streaming until cancelled. */
+* after two seconds of empty frames instead of streaming until cancelled. */
 #define GOODIX_IDLE_REARM_FRAMES 50
 
-struct _FpiDeviceGoodixTls55X4 {
-  FpiDeviceGoodixTls parent;
+struct _FpiDeviceGoodixTls55X4
+{
+  FpiDeviceGoodixTls   parent;
   const GoodixProfile *profile;
-  FpiSsm *activation_ssm;
-  FpiSsm *scan_ssm;
-  GSource *delay;
-  gboolean activating;
-  gboolean deactivating;
-  guint activation_retries;
-  guint transient_retries;
-  gboolean usb_reset_done;
+  FpiSsm              *activation_ssm;
+  FpiSsm              *scan_ssm;
+  GSource             *delay;
+  gboolean             activating;
+  gboolean             deactivating;
+  guint                activation_retries;
+  guint                transient_retries;
+  gboolean             usb_reset_done;
 
-  gboolean calibrated;
-  gboolean rebaselined;
-  gint64 wait_empty_started;
-  Goodix55X4Pix empty_img[GOODIX55X4_FRAME_SIZE];
-  gint empty_mean;
-  guint8 fdt_down_dyn[26];
-  guint8 fdt_down_len;
-  GoodixSwipe swipe;
-  guint release_frames;
-  guint idle_frames;
-  gboolean image_reported;
-  gint64 frame_started;
-  FpImage *pending_image;
-  FpDeviceRetry pending_retry;
-  GError *sleep_error;
+  gboolean             calibrated;
+  gboolean             rebaselined;
+  gint64               wait_empty_started;
+  Goodix55X4Pix        empty_img[GOODIX55X4_FRAME_SIZE];
+  gint                 empty_mean;
+  guint8               fdt_down_dyn[26];
+  guint8               fdt_down_len;
+  GoodixSwipe          swipe;
+  guint                release_frames;
+  guint                idle_frames;
+  gboolean             image_reported;
+  gint64               frame_started;
+  FpImage             *pending_image;
+  FpDeviceRetry        pending_retry;
+  GError              *sleep_error;
 };
 
 G_DECLARE_FINAL_TYPE (FpiDeviceGoodixTls55X4, fpi_device_goodixtls55x4, FPI,
@@ -116,6 +117,7 @@ static void
 check_firmware_version (FpDevice *dev, gchar *firmware, gpointer ssm, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   if (error)
     {
       fpi_ssm_mark_failed (ssm, error);
@@ -128,8 +130,8 @@ check_firmware_version (FpDevice *dev, gchar *firmware, gpointer ssm, GError *er
   if (!self->profile)
     {
       fpi_ssm_mark_failed (ssm, g_error_new (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                                           "Unsupported Goodix firmware '%s' for USB device 27c6:%04x",
-                                           firmware, pid));
+                                             "Unsupported Goodix firmware '%s' for USB device 27c6:%04x",
+                                             firmware, pid));
       return;
     }
   /* The image pipeline is built for one geometry; a profile for another
@@ -138,8 +140,8 @@ check_firmware_version (FpDevice *dev, gchar *firmware, gpointer ssm, GError *er
       self->profile->crop != GOODIX55X4_CROP)
     {
       fpi_ssm_mark_failed (ssm, g_error_new (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                                           "Goodix firmware '%s' uses an unsupported image geometry",
-                                           firmware));
+                                             "Goodix firmware '%s' uses an unsupported image geometry",
+                                             firmware));
       return;
     }
   goodix_set_tls_settle_time (dev, self->profile->tls_settle_ms);
@@ -186,10 +188,11 @@ static void
 activate_run_state (FpiSsm *ssm, FpDevice *dev)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   if (fpi_device_action_is_cancelled (dev))
     {
       fpi_ssm_mark_failed (ssm, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED,
-                                                   "Fingerprint activation cancelled"));
+                                                     "Fingerprint activation cancelled"));
       return;
     }
 
@@ -199,25 +202,32 @@ activate_run_state (FpiSsm *ssm, FpDevice *dev)
       goodix_start_read_loop (dev);
       goodix_send_nop (dev, check_none, ssm);
       break;
+
     case ACTIVATE_ENABLE_CHIP:
       goodix_send_enable_chip (dev, TRUE, check_none, ssm);
       break;
+
     case ACTIVATE_NOP:
       goodix_send_nop (dev, check_none, ssm);
       break;
+
     case ACTIVATE_CHECK_FW_VER:
       goodix_send_firmware_version (dev, check_firmware_version, ssm);
       break;
+
     case ACTIVATE_CHECK_PSK:
       goodix_send_preset_psk_read (dev, GOODIX_55X4_PSK_FLAGS, sizeof (goodix_55x4_psk_0),
-                                  check_preset_psk_read, ssm);
+                                   check_preset_psk_read, ssm);
       break;
+
     case ACTIVATE_RESET:
       goodix_send_reset (dev, TRUE, 20, check_reset, ssm);
       break;
+
     case ACTIVATE_SET_MCU_IDLE:
       goodix_send_mcu_switch_to_idle_mode (dev, 20, check_none, ssm);
       break;
+
     case ACTIVATE_SET_MCU_CONFIG:
       goodix_send_upload_config_mcu (dev, (guint8 *) self->profile->config, self->profile->config_length,
                                      NULL, check_config_upload, ssm);
@@ -225,13 +235,16 @@ activate_run_state (FpiSsm *ssm, FpDevice *dev)
     }
 }
 
-static void activate_complete (FpiSsm *ssm, FpDevice *dev, GError *error);
+static void activate_complete (FpiSsm   *ssm,
+                               FpDevice *dev,
+                               GError   *error);
 static void prepare_capture (FpDevice *dev);
 
 static void
 retry_activation (FpDevice *dev, gpointer unused)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   self->delay = NULL;
   self->activation_ssm = fpi_ssm_new (dev, activate_run_state, ACTIVATE_NUM_STATES);
   fpi_ssm_start (self->activation_ssm, activate_complete);
@@ -255,7 +268,9 @@ activation_error_is_transient (const GError *error)
          g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CONNECTION_CLOSED);
 }
 
-static void tls_activation_complete (FpDevice *dev, gpointer user_data, GError *error);
+static void tls_activation_complete (FpDevice *dev,
+                                     gpointer  user_data,
+                                     GError   *error);
 
 /* Settle time after a port reset, as used by the original opt-in reset. */
 #define GOODIX_USB_RESET_SETTLE_MS 2000
@@ -275,7 +290,7 @@ reset_usb_when_idle (FpDevice *dev, gpointer polls)
   if (goodix_read_pending (dev) && count < GOODIX_USB_RESET_POLLS)
     {
       self->delay = fpi_device_add_timeout (dev, GOODIX_USB_RESET_POLL_MS, reset_usb_when_idle,
-                                           GUINT_TO_POINTER (count + 1), NULL);
+                                            GUINT_TO_POINTER (count + 1), NULL);
       return;
     }
   if (goodix_read_pending (dev))
@@ -297,6 +312,7 @@ tls_activation_complete (FpDevice *dev, gpointer user_data, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
   gboolean cancelled = fpi_device_action_is_cancelled (dev);
+
   if (!error && cancelled)
     error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "Fingerprint activation cancelled");
 
@@ -322,8 +338,8 @@ tls_activation_complete (FpDevice *dev, gpointer user_data, GError *error)
           return;
         }
       /* Two timed-out initializations mean the MCU stopped answering. A
-       * port reset is the only recovery short of replugging; do it once
-       * per open so a dead sensor still fails within one PAM attempt. */
+      * port reset is the only recovery short of replugging; do it once
+      * per open so a dead sensor still fails within one PAM attempt. */
       if (error_is_timeout (error) && !self->usb_reset_done)
         {
           self->usb_reset_done = TRUE;
@@ -393,6 +409,7 @@ static void
 fdt_mode_base_cb (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   if (error)
     {
       fpi_ssm_mark_failed (ssm, error);
@@ -404,7 +421,7 @@ fdt_mode_base_cb (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GEr
   if (length < 6 || length > 28 || length % 2)
     {
       fpi_ssm_mark_failed (ssm, g_error_new (G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                                           "Invalid finger-detection baseline length: %u", length));
+                                             "Invalid finger-detection baseline length: %u", length));
       return;
     }
   guint zones = (length - 4) / 2;
@@ -468,6 +485,7 @@ static void
 on_scan_empty_img (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   if (error || !decode_frame (data, length, self->empty_img, &error))
     {
       fpi_ssm_mark_failed (ssm, error);
@@ -477,7 +495,7 @@ on_scan_empty_img (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GE
   if (self->empty_mean <= 350 || self->empty_mean == 4095)
     {
       fpi_ssm_mark_failed (ssm, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_INVALID_DATA,
-                                                   "Sensor returned an unusable empty calibration image"));
+                                                     "Sensor returned an unusable empty calibration image"));
       return;
     }
   if (!self->fdt_down_len)
@@ -497,6 +515,7 @@ static void
 next_frame (FpDevice *dev, gpointer state)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   self->delay = NULL;
   fpi_ssm_jump_to_state (self->scan_ssm, GPOINTER_TO_INT (state));
 }
@@ -506,6 +525,7 @@ schedule_frame (FpDevice *dev, gint state)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
   gint64 elapsed_ms = (g_get_monotonic_time () - self->frame_started) / 1000;
+
   /* Exactly one frame timer may be pending. */
   if (self->delay)
     {
@@ -513,7 +533,7 @@ schedule_frame (FpDevice *dev, gint state)
       g_clear_pointer (&self->delay, g_source_destroy);
     }
   self->delay = fpi_device_add_timeout (dev, MAX (1, CAPTURE_INTERVAL_MS - elapsed_ms),
-                                       next_frame, GINT_TO_POINTER (state), NULL);
+                                        next_frame, GINT_TO_POINTER (state), NULL);
 }
 
 static void
@@ -521,6 +541,7 @@ scan_on_read_img (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GEr
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
   Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE];
+
   if (error || !decode_frame (data, length, frame, &error))
     {
       fpi_ssm_mark_failed (ssm, error);
@@ -535,7 +556,7 @@ scan_on_read_img (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GEr
         {
           if (++self->release_frames > GOODIX_SWIPE_MAX_FRAMES)
             fpi_ssm_mark_failed (ssm, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
-                                                         "Finger remained on the sensor after the swipe"));
+                                                           "Finger remained on the sensor after the swipe"));
           else
             schedule_frame (dev, SCAN_WAIT_RELEASE);
         }
@@ -559,13 +580,17 @@ scan_on_read_img (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GEr
         }
       schedule_frame (dev, SCAN_READ);
       return;
+
     case GOODIX_SWIPE_FINGER_ON:
       fpi_image_device_report_finger_status (FP_IMAGE_DEVICE (dev), TRUE);
-      if (self->deactivating) return;
-      /* fall through */
+      if (self->deactivating)
+        return;
+
+    /* fall through */
     case GOODIX_SWIPE_CONTINUE:
       schedule_frame (dev, SCAN_READ);
       return;
+
     case GOODIX_SWIPE_COMPLETE:
       self->pending_image = goodix_swipe_take_image (&self->swipe);
       /* The last enrollment image can cause the core to deactivate as soon
@@ -577,9 +602,11 @@ scan_on_read_img (FpDevice *dev, guint8 *data, guint16 length, gpointer ssm, GEr
           return;
         }
       break;
+
     case GOODIX_SWIPE_TOO_SHORT:
       self->pending_retry = FP_DEVICE_RETRY_TOO_SHORT;
       break;
+
     case GOODIX_SWIPE_REMOVE_FINGER:
       self->pending_retry = FP_DEVICE_RETRY_REMOVE_FINGER;
       break;
@@ -591,6 +618,7 @@ static void
 scan_run_state (FpiSsm *ssm, FpDevice *dev)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   switch (fpi_ssm_get_cur_state (ssm))
     {
     case SCAN_QUERY_MCU:
@@ -600,38 +628,46 @@ scan_run_state (FpiSsm *ssm, FpDevice *dev)
       else
         goodix_send_query_mcu_state (dev, check_none_cmd, ssm);
       break;
+
     case SCAN_FDT_MODE:
       goodix_send_mcu_switch_to_fdt_mode (dev, (guint8 *) fdt_mode, sizeof (fdt_mode),
-                                         NULL, fdt_mode_base_cb, ssm);
+                                          NULL, fdt_mode_base_cb, ssm);
       break;
+
     case SCAN_WAIT_EMPTY:
       fp_dbg ("Waiting for finger removal before calibration");
       self->wait_empty_started = g_get_monotonic_time ();
       goodix_send_mcu_switch_to_fdt_up (dev, (guint8 *) fdt_up, sizeof (fdt_up),
-                                       NULL, wait_empty_done, ssm);
+                                        NULL, wait_empty_done, ssm);
       break;
+
     case SCAN_NAV:
       goodix_send_nav_0 (dev, check_none_cmd, ssm);
       break;
+
     case SCAN_CALIBRATE:
       goodix_tls_read_image (dev, on_scan_empty_img, ssm);
       break;
+
     case SCAN_WAIT_FINGER:
       fp_dbg ("Waiting for finger detection");
       self->idle_frames = 0;
       goodix_send_mcu_switch_to_fdt_down (dev, self->fdt_down_dyn, self->fdt_down_len,
-                                         NULL, check_none_cmd, ssm);
+                                          NULL, check_none_cmd, ssm);
       break;
+
     case SCAN_SET_LED:
       /* Retain the single capture-setup command from the known working
-       * sequence. Its extra data reply is unsolicited, not an image. */
+      * sequence. Its extra data reply is unsolicited, not an image. */
       goodix_send_set_led (dev, 0, check_none, ssm);
       break;
+
     case SCAN_READ:
     case SCAN_WAIT_RELEASE:
       self->frame_started = g_get_monotonic_time ();
       goodix_tls_read_image (dev, scan_on_read_img, ssm);
       break;
+
     case SCAN_REPORT:
       {
         FpImage *image = g_steal_pointer (&self->pending_image);
@@ -647,14 +683,18 @@ scan_run_state (FpiSsm *ssm, FpDevice *dev)
             fpi_image_device_image_captured (FP_IMAGE_DEVICE (dev), image);
           }
         else
-          fpi_image_device_retry_scan (FP_IMAGE_DEVICE (dev), retry);
-        if (self->deactivating) return;
+          {
+            fpi_image_device_retry_scan (FP_IMAGE_DEVICE (dev), retry);
+          }
+        if (self->deactivating)
+          return;
         if (self->swipe.present)
           schedule_frame (dev, SCAN_WAIT_RELEASE);
         else
           fpi_ssm_jump_to_state (ssm, SCAN_DONE);
         break;
       }
+
     case SCAN_DONE:
       /* Finger-off can synchronously start the next enrollment scan. */
       fpi_ssm_mark_completed (ssm);
@@ -664,8 +704,8 @@ scan_run_state (FpiSsm *ssm, FpDevice *dev)
 }
 
 /* Verification and identification restart with a fresh activation after a
- * retry, which renegotiates TLS and recalibrates. Enrollment keeps one
- * activation for all stages, and capture callers want the actual error. */
+* retry, which renegotiates TLS and recalibrates. Enrollment keeps one
+* activation for all stages, and capture callers want the actual error. */
 static gboolean
 scan_error_can_retry (FpiDeviceGoodixTls55X4 *self, const GError *error)
 {
@@ -685,13 +725,16 @@ static void
 scan_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   self->scan_ssm = NULL;
   goodix_swipe_clear (&self->swipe);
   if (error)
     {
       g_clear_object (&self->pending_image);
       if (self->deactivating)
-        g_error_free (error);
+        {
+          g_error_free (error);
+        }
       else
         {
           g_prefix_error (&error, "Goodix %s: ", scan_names[fpi_ssm_get_cur_state (ssm)]);
@@ -733,6 +776,7 @@ static void
 prepare_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   self->activation_ssm = NULL;
   if (!error && fpi_device_action_is_cancelled (dev))
     error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "Calibration cancelled");
@@ -759,9 +803,10 @@ static void
 prepare_capture (FpDevice *dev)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   /* Run only the preparation prefix; later scans reuse its calibration. */
   self->activation_ssm = fpi_ssm_new_full (dev, scan_run_state,
-                                         SCAN_WAIT_FINGER, SCAN_WAIT_FINGER, "prepare capture");
+                                           SCAN_WAIT_FINGER, SCAN_WAIT_FINGER, "prepare capture");
   fpi_ssm_start (self->activation_ssm, prepare_complete);
 }
 
@@ -776,6 +821,7 @@ static void
 sleep_step (FpDevice *dev, gpointer ssm, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   /* A failed sleep command must not prevent the remaining cleanup commands. */
   if (!self->sleep_error)
     self->sleep_error = error;
@@ -801,9 +847,11 @@ sleep_run_state (FpiSsm *ssm, FpDevice *dev)
       /* Stop a pending FDT/image operation in the sensor, not just on the host. */
       goodix_send_mcu_switch_to_idle_mode (dev, 20, sleep_step, ssm);
       break;
+
     case SLEEP_SENSOR:
       goodix_send_mcu_switch_to_sleep_mode (dev, 20, sleep_step, ssm);
       break;
+
     case SLEEP_MCU:
       goodix_send_mcu_switch_to_sleep_mode_realtek (dev, 0x6c, sleep_mcu_done, ssm);
       break;
@@ -814,6 +862,7 @@ static void
 sleep_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   goodix_cancel_receive (dev);
   goodix_reset_state (dev);
   goodix_shutdown_tls (dev, NULL);
@@ -871,6 +920,7 @@ static gboolean
 goodix_check_builtin_port (FpDevice *dev, GError **error)
 {
   GUsbDevice *usb = fpi_device_get_usb_device (dev);
+
   g_autoptr(GUsbDevice) node = NULL;
   g_autofree gchar *removable = NULL;
   guint8 ports[8]; /* USB allows at most seven tiers below the root hub */
@@ -918,6 +968,7 @@ dev_init (FpImageDevice *image_dev)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (image_dev);
   GError *error = NULL;
+
   /* Retry and reset budgets are per open, which is one fprintd claim. */
   self->transient_retries = 0;
   self->usb_reset_done = FALSE;
@@ -941,7 +992,7 @@ close_when_idle (FpDevice *dev, gpointer polls)
   if (goodix_read_pending (dev) && count < GOODIX_USB_RESET_POLLS)
     {
       self->delay = fpi_device_add_timeout (dev, GOODIX_USB_RESET_POLL_MS, close_when_idle,
-                                           GUINT_TO_POINTER (count + 1), NULL);
+                                            GUINT_TO_POINTER (count + 1), NULL);
       return;
     }
   goodix_dev_deinit (dev, &error);
@@ -959,6 +1010,7 @@ static void
 dev_activate (FpImageDevice *image_dev)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (image_dev);
+
   self->activation_retries = 0;
   self->activating = TRUE;
   goodix55x4_clear_capture (self);
@@ -977,12 +1029,13 @@ dev_deactivate (FpImageDevice *image_dev)
 {
   FpDevice *dev = FP_DEVICE (image_dev);
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   self->deactivating = TRUE;
   g_clear_pointer (&self->delay, g_source_destroy);
   goodix_cancel_operation (dev);
   if (self->scan_ssm) /* Paused between frames, with no command to cancel. */
     fpi_ssm_mark_failed (self->scan_ssm,
-                        g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "Scan cancelled"));
+                         g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "Scan cancelled"));
   goodix_start_read_loop (dev);
   fpi_ssm_start (fpi_ssm_new (dev, sleep_run_state, SLEEP_NUM_STATES), sleep_complete);
 }
@@ -991,6 +1044,7 @@ static void
 dev_cancel (FpDevice *dev)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   if (self->activating)
     {
       /* The image-device parent ignores cancellation until activation has
@@ -1002,13 +1056,16 @@ dev_cancel (FpDevice *dev)
                                                       "Fingerprint activation cancelled"));
     }
   else
-    FP_DEVICE_CLASS (fpi_device_goodixtls55x4_parent_class)->cancel (dev);
+    {
+      FP_DEVICE_CLASS (fpi_device_goodixtls55x4_parent_class)->cancel (dev);
+    }
 }
 
 static void
 dev_finalize (GObject *object)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (object);
+
   g_clear_pointer (&self->delay, g_source_destroy);
   goodix55x4_clear_capture (self);
   g_clear_error (&self->sleep_error);

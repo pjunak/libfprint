@@ -81,6 +81,7 @@ static void
 fpi_ssm_test_data_unref_by_ssm (gpointer user_data)
 {
   FpiSsmTestData *data = user_data;
+
   data->ssm_destroyed = TRUE;
 
   fpi_ssm_test_data_unref (data);

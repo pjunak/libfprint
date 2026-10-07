@@ -184,6 +184,7 @@ static void
 fp_image_detect_minutiae_free (gpointer user_data)
 {
   DetectMinutiaeData *data = user_data;
+
   g_clear_pointer (&data->image, g_free);
   if (data->minutiae)
     free_minutiae (data->minutiae);

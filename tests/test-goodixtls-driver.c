@@ -36,8 +36,10 @@ mock_usb_reset (GUsbDevice *usb, GError **error)
   return TRUE;
 }
 
-static void record_retry (FpImageDevice *device, FpDeviceRetry retry);
-static void record_finger_status (FpImageDevice *device, gboolean present);
+static void record_retry (FpImageDevice *device,
+                          FpDeviceRetry  retry);
+static void record_finger_status (FpImageDevice *device,
+                                  gboolean       present);
 
 static void
 record_image (FpImageDevice *device, FpImage *image)
@@ -50,7 +52,7 @@ record_image (FpImageDevice *device, FpImage *image)
 
 static gboolean
 usb_interface_failure (GUsbDevice *usb, gint interface,
-                        GUsbDeviceClaimInterfaceFlags flags, GError **error)
+                       GUsbDeviceClaimInterfaceFlags flags, GError **error)
 {
   if (usb_claim_ok)
     return TRUE;
@@ -188,6 +190,7 @@ static void
 report_scan_state (FpiSsm *ssm, FpDevice *dev)
 {
   int state = fpi_ssm_get_cur_state (ssm);
+
   if (state == SCAN_REPORT || state == SCAN_DONE)
     scan_run_state (ssm, dev);
 }
@@ -258,7 +261,7 @@ test_sleep_failure (void)
   g_assert_true (goodix_tls_server_init (priv->tls_hop, NULL));
 
   sleep_complete (NULL, dev,
-                   g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "sleep timeout"));
+                  g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "sleep timeout"));
   /* Deactivation still completes and cleans up, but a missed sleep must not
    * replace the result already reported for this attempt. */
   g_assert_cmpuint (completions, ==, 1);
@@ -315,7 +318,7 @@ test_old_transfer_cancelled (void)
 
 static void
 packet_completion (FpDevice *dev, guint8 *data, guint16 length,
-                    gpointer user_data, GError *error)
+                   gpointer user_data, GError *error)
 {
   record_completion (FP_IMAGE_DEVICE (dev), error);
 }
@@ -367,6 +370,7 @@ test_frame_decode (void)
   Goodix55X4Pix decoded[GOODIX55X4_FRAME_SIZE];
   const guint8 packed[] = {0xab, 0x34, 0x78, 0x56, 0x9a, 0xcd};
   const guint16 pixels[] = {0xb34, 0x56a, 0xd78, 0x9ac};
+
   for (guint i = 0; i < sizeof (raw); i += sizeof (packed))
     memcpy (raw + i, packed, sizeof (packed));
   goodix_image_decode_frame (decoded, raw);
@@ -379,7 +383,9 @@ test_idle_does_not_exhaust_swipe (void)
 {
   GoodixSwipe swipe = {0};
   Goodix55X4Pix background[GOODIX55X4_FRAME_SIZE], frame[GOODIX55X4_FRAME_SIZE];
-  for (guint i = 0; i < G_N_ELEMENTS (background); i++) background[i] = 2600;
+
+  for (guint i = 0; i < G_N_ELEMENTS (background); i++)
+    background[i] = 2600;
   goodix_swipe_start (&swipe, 2600);
   for (guint i = 0; i < 2 * GOODIX_SWIPE_MAX_FRAMES; i++)
     {
@@ -390,10 +396,12 @@ test_idle_does_not_exhaust_swipe (void)
   /* A slow placement must not pull the empty baseline down with it. */
   for (guint mean = 2580; mean >= 2260; mean -= 20)
     {
-      for (guint i = 0; i < G_N_ELEMENTS (frame); i++) frame[i] = mean;
+      for (guint i = 0; i < G_N_ELEMENTS (frame); i++)
+        frame[i] = mean;
       g_assert_cmpint (goodix_swipe_feed (&swipe, frame, background), ==, GOODIX_SWIPE_WAIT);
     }
-  for (guint i = 0; i < G_N_ELEMENTS (frame); i++) frame[i] = 2240;
+  for (guint i = 0; i < G_N_ELEMENTS (frame); i++)
+    frame[i] = 2240;
   g_assert_cmpint (goodix_swipe_feed (&swipe, frame, background), ==, GOODIX_SWIPE_FINGER_ON);
   g_assert_cmpuint (swipe.n_frames, ==, 1);
   goodix_swipe_clear (&swipe);
@@ -422,6 +430,7 @@ test_read_holds_device (void)
 {
   FpDevice *dev = new_device ();
   gpointer weak = dev;
+
   g_object_add_weak_pointer (G_OBJECT (dev), &weak);
   goodix_start_read_loop (dev);
   goodix_cancel_receive (dev);
@@ -490,6 +499,7 @@ psk_result (FpDevice *dev, gboolean success, guint32 flags, guint8 *psk,
             guint16 length, gpointer user_data, GError *error)
 {
   guint expected_length = GPOINTER_TO_UINT (user_data);
+
   if (!error)
     {
       g_assert_true (success);
@@ -510,6 +520,7 @@ static GoodixCallbackInfo *
 psk_callback (guint expected_length)
 {
   GoodixCallbackInfo *info = g_new0 (GoodixCallbackInfo, 1);
+
   info->callback = G_CALLBACK (psk_result);
   info->user_data = GUINT_TO_POINTER (expected_length);
   return info;
@@ -634,6 +645,7 @@ static void
 test_protocol_checksum_wrap (void)
 {
   guint8 bytes[256];
+
   for (guint i = 0; i < G_N_ELEMENTS (bytes); i++)
     {
       g_autofree guint8 *encoded = NULL;
@@ -660,7 +672,7 @@ test_async_chunks (void)
   guint8 payload[130] = {1};
   sent_data = bytes;
   goodix_send_protocol (dev, GOODIX_CMD_UPLOAD_CONFIG_MCU, payload, sizeof (payload),
-                         NULL, TRUE, GOODIX_TIMEOUT, TRUE, packet_completion, NULL);
+                        NULL, TRUE, GOODIX_TIMEOUT, TRUE, packet_completion, NULL);
   g_assert_cmpuint (bytes->len, ==, 0);
   drain_writes ();
   g_assert_cmpuint (bytes->len, ==, 192);
@@ -678,10 +690,10 @@ test_async_cancel_and_retry (void)
   guint8 payload[130] = {1};
   sent_data = bytes;
   goodix_send_protocol (dev, GOODIX_CMD_UPLOAD_CONFIG_MCU, payload, sizeof (payload),
-                         NULL, TRUE, GOODIX_TIMEOUT, TRUE, packet_completion, NULL);
+                        NULL, TRUE, GOODIX_TIMEOUT, TRUE, packet_completion, NULL);
   g_main_context_iteration (NULL, FALSE); /* Only the first chunk was sent. */
   goodix_receive_done (dev, NULL, 0,
-    g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancel"));
+                       g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancel"));
   g_assert_error (reported_error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
   g_clear_error (&reported_error);
   goodix_send_nop (dev, tls_completion, NULL);
@@ -715,7 +727,7 @@ test_finger_wait_ack_deadline (void)
   guint8 ack[] = {GOODIX_CMD_MCU_SWITCH_TO_FDT_DOWN, 1};
   sent_data = bytes;
   goodix_send_protocol (dev, ack[0], payload, sizeof (payload), NULL, TRUE,
-                         0, TRUE, packet_completion, NULL);
+                        0, TRUE, packet_completion, NULL);
   drain_writes ();
   g_assert_nonnull (priv->timeout); /* Even indefinite finger wait needs an ACK. */
   goodix_receive_ack (dev, ack, sizeof (ack), NULL, NULL);
@@ -863,6 +875,7 @@ write_removable (const gchar *root, const gchar *name, const gchar *value)
 {
   g_autofree gchar *dir = g_build_filename (root, "bus", "usb", "devices", name, NULL);
   g_autofree gchar *file = g_build_filename (dir, "removable", NULL);
+
   g_assert_cmpint (g_mkdir_with_parents (dir, 0700), ==, 0);
   g_assert_true (g_file_set_contents (file, value, -1, NULL));
 }
@@ -891,6 +904,7 @@ test_builtin_port_policy (void)
   const guint8 behind_hub[] = {1, 4};
   g_autofree gchar *external = NULL;
   g_autofree gchar *hub = NULL;
+
   g_autoptr(FpDevice) dev = NULL;
 
   /* The built-in reader: a fixed port on the root hub. */
@@ -944,6 +958,7 @@ static void
 fail_scan (FpDevice *dev, GError *error)
 {
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
   self->scan_ssm = fpi_ssm_new (dev, idle_state, SCAN_NUM_STATES);
   fpi_ssm_start (self->scan_ssm, scan_complete);
   fpi_ssm_jump_to_state (self->scan_ssm, SCAN_READ);
@@ -1079,14 +1094,16 @@ static GByteArray *
 hex_bytes (const gchar *hex)
 {
   GByteArray *bytes = g_byte_array_new ();
+
   g_assert_cmpuint (strlen (hex) % 2, ==, 0);
-  for (gsize i = 0; hex[i]; i += 2) {
-    gint high = g_ascii_xdigit_value (hex[i]), low = g_ascii_xdigit_value (hex[i + 1]);
-    g_assert_cmpint (high, >=, 0);
-    g_assert_cmpint (low, >=, 0);
-    guint8 value = (high << 4) | low;
-    g_byte_array_append (bytes, &value, 1);
-  }
+  for (gsize i = 0; hex[i]; i += 2)
+    {
+      gint high = g_ascii_xdigit_value (hex[i]), low = g_ascii_xdigit_value (hex[i + 1]);
+      g_assert_cmpint (high, >=, 0);
+      g_assert_cmpint (low, >=, 0);
+      guint8 value = (high << 4) | low;
+      g_byte_array_append (bytes, &value, 1);
+    }
   return bytes;
 }
 
@@ -1135,6 +1152,7 @@ queue_pack (guint8 flags, const guint8 *data, guint16 size)
 {
   g_autofree guint8 *packet = NULL;
   guint32 length;
+
   goodix_encode_pack (flags, (guint8 *) data, size, TRUE, &packet, &length);
   queue_rx (packet, length);
 }
@@ -1145,6 +1163,7 @@ queue_ack (guint8 cmd)
   guint8 ack[] = {cmd, 1};
   g_autofree guint8 *protocol = NULL;
   guint32 length;
+
   goodix_encode_protocol (GOODIX_CMD_ACK, ack, sizeof (ack), TRUE, FALSE, &protocol, &length);
   queue_pack (GOODIX_FLAGS_MSG_PROTOCOL, protocol, length);
 }
@@ -1181,7 +1200,8 @@ replay_write (FpDevice *dev, const guint8 *data, gsize size)
   GoodixPacket packet;
   gint parsed = goodix_packet_peek (outgoing->data, outgoing->len, &packet);
   g_assert_cmpint (parsed, >=, 0);
-  if (!parsed) return;
+  if (!parsed)
+    return;
 
   if (trace_step < trace_steps)
     {
@@ -1197,7 +1217,9 @@ replay_write (FpDevice *dev, const guint8 *data, gsize size)
       queue_rx (response->data, response->len);
     }
   else if (packet.flags == GOODIX_FLAGS_TLS)
-    sensor_handshake (packet.payload, packet.length);
+    {
+      sensor_handshake (packet.payload, packet.length);
+    }
   else
     {
       g_assert_cmpuint (packet.flags, ==, GOODIX_FLAGS_MSG_PROTOCOL);
@@ -1209,9 +1231,11 @@ replay_write (FpDevice *dev, const guint8 *data, gsize size)
         case GOODIX_CMD_REQUEST_TLS_CONNECTION:
           sensor_handshake (NULL, 0);
           break;
+
         case GOODIX_CMD_TLS_SUCCESSFULLY_ESTABLISHED:
           g_assert_true (SSL_is_init_finished (sensor));
           break;
+
         case GOODIX_CMD_QUERY_MCU_STATE:
         case GOODIX_CMD_MCU_SWITCH_TO_FDT_UP:
         case GOODIX_CMD_MCU_SWITCH_TO_FDT_MODE:
@@ -1223,20 +1247,23 @@ replay_write (FpDevice *dev, const guint8 *data, gsize size)
             queue_pack (GOODIX_FLAGS_MSG_PROTOCOL, protocol, length);
             break;
           }
+
         case GOODIX_CMD_NAV_0:
           break;
+
         case GOODIX_CMD_MCU_GET_IMAGE:
           {
             /* Two TLS records exercise record coalescing inside one USB packet. */
             g_assert_cmpint (SSL_write (sensor, replay_image, 5000), ==, 5000);
             g_assert_cmpint (SSL_write (sensor, replay_image + 5000, sizeof (replay_image) - 5000),
-                            ==, sizeof (replay_image) - 5000);
+                             ==, sizeof (replay_image) - 5000);
             guint8 encrypted[20000] = {0};
             int length = BIO_read (SSL_get_wbio (sensor), encrypted + 9, sizeof (encrypted) - 9);
             g_assert_cmpint (length, >, 0);
             queue_pack (GOODIX_FLAGS_TLS_DATA, encrypted, length + 9);
             break;
           }
+
         default:
           g_error ("Unexpected command after setup replay: 0x%02x", cmd);
         }
@@ -1255,6 +1282,7 @@ static void
 await_completions (guint expected)
 {
   guint timeout = g_timeout_add_seconds (5, replay_watchdog, NULL);
+
   while (completions < expected)
     g_main_context_iteration (NULL, TRUE);
   g_source_remove (timeout);
@@ -1277,7 +1305,7 @@ test_setup_replay (gconstpointer fragment)
   g_autoptr(GKeyFile) fixture = g_key_file_new ();
   const gchar *override = g_getenv ("GOODIX_TEST_SETUP_TRACE");
   g_autofree gchar *path = override ? g_strdup (override) :
-    g_build_filename (g_getenv ("MESON_SOURCE_ROOT"), "tests", "goodix-setup-replay.ini", NULL);
+                           g_build_filename (g_getenv ("MESON_SOURCE_ROOT"), "tests", "goodix-setup-replay.ini", NULL);
   g_autoptr(GError) error = NULL;
   g_assert_true (g_key_file_load_from_file (fixture, path, G_KEY_FILE_NONE, &error));
   g_assert_no_error (error);
@@ -1322,7 +1350,8 @@ test_setup_replay (gconstpointer fragment)
       dev_activate (FP_IMAGE_DEVICE (dev));
       await_completions (cycle * 2 + 1);
       g_assert_cmpuint (trace_step, ==, trace_steps);
-      for (guint i = 0; i < sizeof (replay_image); i++) replay_image[i] = (i + cycle) % 251;
+      for (guint i = 0; i < sizeof (replay_image); i++)
+        replay_image[i] = (i + cycle) % 251;
       goodix_tls_read_image (dev, replayed_image, NULL);
       await_completions (cycle * 2 + 2);
       drain_writes ();

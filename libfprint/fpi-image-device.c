@@ -331,7 +331,7 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
                                           &error);
           else if (priv->algorithm == FPI_PRINT_SIGFM)
             result = fpi_print_sigfm_match (template, print, priv->bz3_threshold,
-                                          &error);
+                                            &error);
         }
       else
         {
@@ -360,7 +360,7 @@ fpi_image_device_minutiae_detected (GObject *source_object, GAsyncResult *res, g
                                                 priv->bz3_threshold, &error);
           else if (priv->algorithm == FPI_PRINT_SIGFM)
             match_result = fpi_print_sigfm_match (template, print,
-                                                priv->bz3_threshold, &error);
+                                                  priv->bz3_threshold, &error);
 
           if (match_result == FPI_MATCH_SUCCESS)
             {
@@ -524,8 +524,8 @@ fpi_image_device_image_captured (FpImageDevice *self, FpImage *image)
   else
     {
       fpi_image_extract_sigfm_info (image,
-                                 fpi_device_get_cancellable (FP_DEVICE (self)),
-                                 fpi_image_device_minutiae_detected, self);
+                                    fpi_device_get_cancellable (FP_DEVICE (self)),
+                                    fpi_image_device_minutiae_detected, self);
     }
 
   /* XXX: This is wrong if we add support for raw capture mode. */

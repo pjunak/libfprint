@@ -57,6 +57,7 @@ conversation (int count, const struct pam_message **messages, struct pam_respons
               reply[i].resp = strdup ("asked");
             }
           break;
+
         default:
           printf ("INFO:%s\n", message->msg);
           fflush (stdout);

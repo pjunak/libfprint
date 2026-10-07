@@ -8,6 +8,11 @@ state and implementation dependencies (such as OpenCV) out of installed public
 headers. Complete each asynchronous operation exactly once, including on
 cancellation and transport errors.
 
+C code follows upstream's GNU-like style. Format the files you touch with
+`uncrustify -c scripts/uncrustify.cfg --replace --no-backup <files>` (the fork
+was formatted with uncrustify 0.83). `scripts/uncrustify.sh --check` checks
+the whole tree, where upstream's `elanmoc.c` is known not to pass.
+
 For this fork, start with the hardware-free commands in [tests/README.md](tests/README.md).
 Keep protocol and lifecycle fixes covered by regression tests. Sensor config,
 matching thresholds and swipe heuristics also need physical-reader validation;

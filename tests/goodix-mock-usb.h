@@ -3,18 +3,21 @@
 #include "drivers_api.h"
 
 static GByteArray *sent_data;
-typedef struct {
-  FpiUsbTransfer *transfer;
-  GCancellable *cancellable;
+typedef struct
+{
+  FpiUsbTransfer        *transfer;
+  GCancellable          *cancellable;
   FpiUsbTransferCallback callback;
-  gpointer data;
-  gulong cancel_handler;
+  gpointer               data;
+  gulong                 cancel_handler;
 } MockTransfer;
 static gboolean fail_write;
 static MockTransfer *pending_read;
 static GQueue incoming = G_QUEUE_INIT;
 static guint read_idle;
-static void (*observe_write) (FpDevice *, const guint8 *, gsize);
+static void (*observe_write) (FpDevice *,
+                              const guint8 *,
+                              gsize);
 
 static void
 free_mock_transfer (MockTransfer *mock)
@@ -31,9 +34,12 @@ complete_mock_read (gpointer unused)
 {
   MockTransfer *mock = g_steal_pointer (&pending_read);
   GError *error = NULL;
+
   read_idle = 0;
   if (g_cancellable_is_cancelled (mock->cancellable))
-    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancelled mock read");
+    {
+      error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancelled mock read");
+    }
   else
     {
       g_autoptr(GBytes) bytes = g_queue_pop_head (&incoming);
@@ -61,18 +67,24 @@ complete_mock_transfer (gpointer data)
 {
   MockTransfer *mock = data;
   GError *error = NULL;
+
   if (g_cancellable_is_cancelled (mock->cancellable))
-    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancelled mock USB transfer");
-  else if (fail_write) {
-    fail_write = FALSE;
-    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "mock write timeout");
-  } else {
-    g_assert_nonnull (sent_data);
-    g_byte_array_append (sent_data, mock->transfer->buffer, mock->transfer->length);
-    mock->transfer->actual_length = mock->transfer->length;
-    if (observe_write)
-      observe_write (mock->transfer->device, mock->transfer->buffer, mock->transfer->length);
-  }
+    {
+      error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancelled mock USB transfer");
+    }
+  else if (fail_write)
+    {
+      fail_write = FALSE;
+      error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_TIMED_OUT, "mock write timeout");
+    }
+  else
+    {
+      g_assert_nonnull (sent_data);
+      g_byte_array_append (sent_data, mock->transfer->buffer, mock->transfer->length);
+      mock->transfer->actual_length = mock->transfer->length;
+      if (observe_write)
+        observe_write (mock->transfer->device, mock->transfer->buffer, mock->transfer->length);
+    }
   mock->callback (mock->transfer, mock->transfer->device, mock->data, error);
   free_mock_transfer (mock);
   return G_SOURCE_REMOVE;
@@ -83,7 +95,8 @@ record_usb_submit (FpiUsbTransfer *transfer, guint timeout, GCancellable *cancel
                    FpiUsbTransferCallback callback, gpointer user_data)
 {
   MockTransfer *mock = g_new0 (MockTransfer, 1);
-  *mock = (MockTransfer) {transfer, g_object_ref (cancellable), callback, user_data, 0};
+
+  *mock = (MockTransfer){transfer, g_object_ref (cancellable), callback, user_data, 0};
   if (transfer->endpoint & 0x80)
     {
       g_assert_null (pending_read);
@@ -101,6 +114,6 @@ record_usb_submit (FpiUsbTransfer *transfer, guint timeout, GCancellable *cancel
 static void
 drain_writes (void)
 {
-  while (g_main_context_iteration (NULL, FALSE));
+  while (g_main_context_iteration (NULL, FALSE))
+    ;
 }
-

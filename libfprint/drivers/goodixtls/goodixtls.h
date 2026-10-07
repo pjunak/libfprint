@@ -30,12 +30,20 @@ typedef struct
   SSL     *ssl_layer;
 } GoodixTlsServer;
 
-gboolean goodix_tls_server_init (GoodixTlsServer *self, GError **error);
-gboolean goodix_tls_server_deinit (GoodixTlsServer *self, GError **error);
+gboolean goodix_tls_server_init (GoodixTlsServer *self,
+                                 GError         **error);
+gboolean goodix_tls_server_deinit (GoodixTlsServer *self,
+                                   GError         **error);
 gboolean goodix_tls_server_handshake (GoodixTlsServer *self,
-                                      gboolean *complete, GError **error);
-int goodix_tls_client_send (GoodixTlsServer *self, const guint8 *data,
-                            guint16 length);
-int goodix_tls_client_recv (GoodixTlsServer *self, guint8 *data, guint16 length);
-int goodix_tls_server_receive (GoodixTlsServer *self, guint8 *data,
-                               guint32 length, GError **error);
+                                      gboolean        *complete,
+                                      GError         **error);
+int goodix_tls_client_send (GoodixTlsServer *self,
+                            const guint8    *data,
+                            guint16          length);
+int goodix_tls_client_recv (GoodixTlsServer *self,
+                            guint8          *data,
+                            guint16          length);
+int goodix_tls_server_receive (GoodixTlsServer *self,
+                               guint8          *data,
+                               guint32          length,
+                               GError         **error);

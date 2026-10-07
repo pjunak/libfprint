@@ -24,9 +24,13 @@
 #define GOODIX55X4_SWIPE_FRAME_H GOODIX55X4_OUT_WIDTH  /* 48  */
 
 typedef guint16 Goodix55X4Pix;
-void goodix_image_decode_frame (Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE], const guint8 *raw);
-void goodix_image_postprocess_frame (Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE], const Goodix55X4Pix background[GOODIX55X4_FRAME_SIZE]);
+void goodix_image_decode_frame (Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
+                                const guint8 *raw);
+void goodix_image_postprocess_frame (Goodix55X4Pix       frame[GOODIX55X4_FRAME_SIZE],
+                                     const Goodix55X4Pix background[GOODIX55X4_FRAME_SIZE]);
 gint goodix_image_swipe_raw_mean (const Goodix55X4Pix *frame);
-void goodix_image_swipe_build_out (const Goodix55X4Pix *frame, guint8 *out);
+void goodix_image_swipe_build_out (const Goodix55X4Pix *frame,
+                                   guint8              *out);
 void goodix_image_swipe_fpn_stretch (guint8 *image);
-guint goodix_image_swipe_out_diff (const guint8 *a, const guint8 *b);
+guint goodix_image_swipe_out_diff (const guint8 *a,
+                                   const guint8 *b);

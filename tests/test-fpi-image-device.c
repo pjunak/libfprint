@@ -5,7 +5,7 @@
 typedef struct
 {
   FpImageDevice parent;
-  guint activations;
+  guint         activations;
 } FpiImageDeviceTest;
 
 typedef FpImageDeviceClass FpiImageDeviceTestClass;
@@ -29,10 +29,11 @@ static void
 image_activate (FpImageDevice *device)
 {
   FpiImageDeviceTest *self = (FpiImageDeviceTest *) device;
+
   self->activations++;
   fpi_image_device_activate_complete (device,
-                                     g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED,
-                                                          "Test activation failure"));
+                                      g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED,
+                                                           "Test activation failure"));
 }
 
 static void
@@ -44,6 +45,7 @@ static void
 fpi_image_device_test_class_init (FpiImageDeviceTestClass *class)
 {
   FpDeviceClass *device_class = FP_DEVICE_CLASS (class);
+
   device_class->id = "image-test";
   device_class->full_name = "Image recovery test device";
   device_class->type = FP_DEVICE_TYPE_VIRTUAL;

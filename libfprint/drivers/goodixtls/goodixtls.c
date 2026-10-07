@@ -165,7 +165,9 @@ goodix_tls_server_receive (GoodixTlsServer *self, guint8 *data,
                                "Incomplete TLS image record");
         }
       else
-        set_tls_error (error, "TLS image read", ssl_error);
+        {
+          set_tls_error (error, "TLS image read", ssl_error);
+        }
       return -1;
     }
 

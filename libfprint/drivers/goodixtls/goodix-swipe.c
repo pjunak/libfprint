@@ -84,7 +84,7 @@ swipe_result (GoodixSwipe *swipe)
 
 GoodixSwipeResult
 goodix_swipe_feed (GoodixSwipe *swipe, Goodix55X4Pix *frame,
-                  const Goodix55X4Pix *background)
+                   const Goodix55X4Pix *background)
 {
   gint mean = goodix_image_swipe_raw_mean (frame);
   gboolean present = mean < swipe->baseline - FINGER_DROP;
@@ -155,6 +155,7 @@ goodix_swipe_take_image (GoodixSwipe *swipe)
     .image_width = GOODIX55X4_SWIPE_FRAME_W,
     .get_pixel = get_pixel,
   };
+
   g_return_val_if_fail (swipe->n_stripes >= GOODIX_SWIPE_MIN_STRIPES, NULL);
   swipe->stripes = g_slist_reverse (swipe->stripes);
   for (GSList *item = swipe->stripes; item; item = item->next)

@@ -3294,6 +3294,7 @@ static void
 timeout_data_destroyed (gpointer data)
 {
   gboolean *destroyed = data;
+
   *destroyed = TRUE;
 }
 
@@ -3301,6 +3302,7 @@ static void
 test_destroy_device_with_pending_timeout (void)
 {
   gboolean destroyed = FALSE;
+
   g_autoptr(FpDevice) device = g_object_new (FPI_TYPE_DEVICE_FAKE, NULL);
   fpi_device_add_timeout (device, 60000, timeout_must_not_run, &destroyed, timeout_data_destroyed);
   g_clear_object (&device);

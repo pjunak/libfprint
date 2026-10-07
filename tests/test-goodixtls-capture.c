@@ -12,10 +12,23 @@ mock_interface (GUsbDevice *usb, gint interface, GUsbDeviceClaimInterfaceFlags f
   return TRUE;
 }
 
-static GUsbDevice *mock_usb_device (FpDevice *device) { return NULL; }
-static guint16 mock_pid (GUsbDevice *usb) { return 0x55a2; }
+static GUsbDevice *
+mock_usb_device (FpDevice *device)
+{
+  return NULL;
+}
+static guint16
+mock_pid (GUsbDevice *usb)
+{
+  return 0x55a2;
+}
 static guint usb_resets;
-static gboolean mock_usb_reset (GUsbDevice *usb, GError **error) { usb_resets++; return TRUE; }
+static gboolean
+mock_usb_reset (GUsbDevice *usb, GError **error)
+{
+  usb_resets++;
+  return TRUE;
+}
 
 #define g_usb_device_reset mock_usb_reset
 #define g_usb_device_claim_interface mock_interface
@@ -66,6 +79,7 @@ queue_pack (guint8 flags, const guint8 *data, guint16 size)
 {
   g_autofree guint8 *packet = NULL;
   guint32 length;
+
   goodix_encode_pack (flags, (guint8 *) data, size, TRUE, &packet, &length);
   queue_rx (packet, length);
 }
@@ -75,6 +89,7 @@ queue_reply (guint8 command, const guint8 *data, guint16 size)
 {
   g_autofree guint8 *protocol = NULL;
   guint32 length;
+
   goodix_encode_protocol (command, (guint8 *) data, size, TRUE, FALSE, &protocol, &length);
   queue_pack (GOODIX_FLAGS_MSG_PROTOCOL, protocol, length);
 }
@@ -82,7 +97,8 @@ queue_reply (guint8 command, const guint8 *data, guint16 size)
 static void
 sensor_handshake (const guint8 *data, guint size)
 {
-  if (size) g_assert_cmpint (BIO_write (SSL_get_rbio (sensor), data, size), ==, size);
+  if (size)
+    g_assert_cmpint (BIO_write (SSL_get_rbio (sensor), data, size), ==, size);
   ERR_clear_error ();
   int result = SSL_do_handshake (sensor);
   if (result != 1)
@@ -102,6 +118,7 @@ send_frame (void)
   guint8 raw[GOODIX55X4_RAW_FRAME_SIZE + 4] = {0};
   guint moving_frames = short_swipe ? 2 : 16;
   gboolean empty = calibration_next || (!hold_finger && frame_number > moving_frames + 8);
+
   if (!calibration_next && idle_frames_before_touch)
     {
       idle_frames_before_touch--;
@@ -116,7 +133,9 @@ send_frame (void)
       calibration_next = FALSE;
     }
   else
-    sensor_has_finger = !empty;
+    {
+      sensor_has_finger = !empty;
+    }
 
   guint stripe = MIN (frame_number, moving_frames);
   for (guint y = 0; y < GOODIX55X4_HEIGHT; y++)
@@ -149,7 +168,8 @@ send_frame (void)
     }
   if (!empty)
     {
-      if (frame_number > moving_frames) held_frames++;
+      if (frame_number > moving_frames)
+        held_frames++;
       frame_number++;
     }
   if (hold_finger && held_frames >= 5 && test_cancel)
@@ -165,7 +185,7 @@ send_frame (void)
 static gboolean
 delayed_fdt_up_reply (gpointer unused)
 {
-  queue_reply (GOODIX_CMD_MCU_SWITCH_TO_FDT_UP, (guint8[]) {0, 0}, 2);
+  queue_reply (GOODIX_CMD_MCU_SWITCH_TO_FDT_UP, (guint8[]){0, 0}, 2);
   return G_SOURCE_REMOVE;
 }
 
@@ -176,9 +196,12 @@ sensor_write (FpDevice *device, const guint8 *data, gsize size)
   GoodixPacket packet;
   gint parsed = goodix_packet_peek (outgoing->data, outgoing->len, &packet);
   g_assert_cmpint (parsed, >=, 0);
-  if (!parsed) return;
+  if (!parsed)
+    return;
   if (packet.flags == GOODIX_FLAGS_TLS)
-    sensor_handshake (packet.payload, packet.length);
+    {
+      sensor_handshake (packet.payload, packet.length);
+    }
   else
     {
       guint8 command = packet.payload[0];
@@ -204,12 +227,14 @@ sensor_write (FpDevice *device, const guint8 *data, gsize size)
         case GOODIX_CMD_NAV_0:
         case GOODIX_CMD_TLS_SUCCESSFULLY_ESTABLISHED:
           break;
+
         case GOODIX_CMD_FIRMWARE_VERSION:
           {
             const guint8 fw[] = "GF3206_RTSEC_APP_10052";
             queue_reply (command, fw, sizeof (fw));
             break;
           }
+
         case GOODIX_CMD_PRESET_PSK_READ:
           {
             guint8 psk[41] = {0, 7, 0, 2, 0xbb, 32};
@@ -217,12 +242,15 @@ sensor_write (FpDevice *device, const guint8 *data, gsize size)
             queue_reply (command, psk, sizeof (psk));
             break;
           }
+
         case GOODIX_CMD_RESET:
-          queue_reply (command, (guint8[]) {1, 0, 4}, 3);
+          queue_reply (command, (guint8[]){1, 0, 4}, 3);
           break;
+
         case GOODIX_CMD_UPLOAD_CONFIG_MCU:
-          queue_reply (command, (guint8[]) {1, 0}, 2);
+          queue_reply (command, (guint8[]){1, 0}, 2);
           break;
+
         case GOODIX_CMD_REQUEST_TLS_CONNECTION:
           SSL_free (sensor);
           sensor = SSL_new (sensor_ctx);
@@ -232,16 +260,19 @@ sensor_write (FpDevice *device, const guint8 *data, gsize size)
           SSL_set_connect_state (sensor);
           sensor_handshake (NULL, 0);
           break;
+
         case GOODIX_CMD_QUERY_MCU_STATE:
-          queue_reply (command, (guint8[]) {1, 2, 0x30, 0}, 4);
+          queue_reply (command, (guint8[]){1, 2, 0x30, 0}, 4);
           break;
+
         case GOODIX_CMD_MCU_SWITCH_TO_FDT_MODE:
           mode_commands++;
           if (invalid_baseline)
-            queue_reply (command, (guint8[]) {0, 0, 0, 0, 0x60}, 5);
+            queue_reply (command, (guint8[]){0, 0, 0, 0, 0x60}, 5);
           else if (!drop_mode_reply)
-            queue_reply (command, (guint8[]) {0, 0, 0, 0, 0x60, 1, 0x62, 1}, 8);
+            queue_reply (command, (guint8[]){0, 0, 0, 0, 0x60, 1, 0x62, 1}, 8);
           break;
+
         case GOODIX_CMD_MCU_SWITCH_TO_FDT_UP:
           calibration_next = TRUE;
           if (slow_fdt_up_count)
@@ -250,33 +281,41 @@ sensor_write (FpDevice *device, const guint8 *data, gsize size)
               g_timeout_add (slow_fdt_up_ms, delayed_fdt_up_reply, NULL);
             }
           else
-            queue_reply (command, (guint8[]) {0, 0}, 2);
+            {
+              queue_reply (command, (guint8[]){0, 0}, 2);
+            }
           break;
+
         case GOODIX_CMD_MCU_SWITCH_TO_FDT_DOWN:
           g_assert_false (sensor_has_finger);
           swipe_number++;
           frame_number = 0;
-          queue_reply (command, (guint8[]) {0, 0}, 2);
+          queue_reply (command, (guint8[]){0, 0}, 2);
           break;
+
         case GOODIX_CMD_SET_LED:
           led_commands++;
           /* This unsolicited response occurs on the actual notebook. */
-          queue_reply (command, (guint8[]) {1, 0}, 2);
+          queue_reply (command, (guint8[]){1, 0}, 2);
           break;
+
         case GOODIX_CMD_MCU_GET_IMAGE:
           if (lost_tls || (lost_tls_swipe && !calibration_next))
-            queue_reply (GOODIX_CMD_REQUEST_TLS_CONNECTION, (guint8[]) {0, 0}, 2);
+            queue_reply (GOODIX_CMD_REQUEST_TLS_CONNECTION, (guint8[]){0, 0}, 2);
           else
             send_frame ();
           break;
+
         case GOODIX_CMD_MCU_SWITCH_TO_SLEEP_MODE:
           sleep_commands++;
           break;
+
         case GOODIX_CMD_MCU_SWITCH_TO_SLEEP_MODE_REALTEK:
           sleep_commands++;
-          queue_reply (command, (guint8[]) {1, 0}, 2);
+          queue_reply (command, (guint8[]){1, 0}, 2);
           sensor_has_finger = FALSE;
           break;
+
         default:
           g_error ("Unexpected USB command 0x%02x", command);
         }
@@ -296,6 +335,7 @@ static FpDevice *
 new_device (void)
 {
   FpDeviceClass *class = g_type_class_ref (fpi_device_goodixtls55x4_get_type ());
+
   /* USB calls are mocked at the boundary. Virtual type only skips the core's
    * real USB open; all image-device activation/completion callbacks remain. */
   class->type = FP_DEVICE_TYPE_VIRTUAL;
@@ -340,7 +380,8 @@ teardown_peer (void)
       g_autoptr(GBytes) bytes = g_queue_pop_head (&incoming);
       gsize size;
       const guint8 *padding = g_bytes_get_data (bytes, &size);
-      for (gsize i = 0; i < size; i++) g_assert_cmpuint (padding[i], ==, 0);
+      for (gsize i = 0; i < size; i++)
+        g_assert_cmpuint (padding[i], ==, 0);
     }
   g_assert_cmpuint (outgoing->len, ==, 0);
   SSL_free (sensor);
@@ -356,6 +397,7 @@ static void
 assert_inactive (FpDevice *device)
 {
   FpiImageDeviceState state;
+
   g_object_get (device, "fpi-image-device-state", &state, NULL);
   g_assert_cmpint (state, ==, FPI_IMAGE_DEVICE_STATE_INACTIVE);
   FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (device);
@@ -415,7 +457,7 @@ test_enroll (void)
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   g_autoptr(FpPrint) print = fp_device_enroll_sync (device, fp_print_new (device), NULL,
-                                                  enrolled_stage, NULL, &error);
+                                                    enrolled_stage, NULL, &error);
   g_assert_no_error (error);
   g_assert_nonnull (print);
   g_assert_cmpuint (enroll_progress, ==, 6);
@@ -463,6 +505,7 @@ static void
 cancel_at_state (GObject *object, GParamSpec *pspec, gpointer state)
 {
   FpiImageDeviceState current;
+
   g_object_get (object, "fpi-image-device-state", &current, NULL);
   if (current == GPOINTER_TO_INT (state))
     g_cancellable_cancel (test_cancel);
@@ -487,18 +530,24 @@ test_cancel_reactivate (gconstpointer phase)
       stop_after_ack = TRUE;
     }
   else if (which == 256)
-    cancel_settle = TRUE;
+    {
+      cancel_settle = TRUE;
+    }
   else if (which == 257)
     {
       fail_write = TRUE;
       g_timeout_add (25, cancel_later, NULL); /* activation retry backoff */
     }
   else if (which == 260)
-    hold_finger = TRUE;
+    {
+      hold_finger = TRUE;
+    }
   else
-    handler = g_signal_connect (device, "notify::fpi-image-device-state", G_CALLBACK (cancel_at_state),
-                                GINT_TO_POINTER (which == 258 ? FPI_IMAGE_DEVICE_STATE_CAPTURE :
-                                                                FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_OFF));
+    {
+      handler = g_signal_connect (device, "notify::fpi-image-device-state", G_CALLBACK (cancel_at_state),
+                                  GINT_TO_POINTER (which == 258 ? FPI_IMAGE_DEVICE_STATE_CAPTURE :
+                                                   FPI_IMAGE_DEVICE_STATE_AWAIT_FINGER_OFF));
+    }
   gint64 start = g_get_monotonic_time ();
   g_assert_null (fp_device_capture_sync (device, TRUE, cancel, &error));
   g_assert_error (error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
@@ -506,7 +555,8 @@ test_cancel_reactivate (gconstpointer phase)
   if (which <= 257)
     g_assert_cmpint (g_get_monotonic_time () - start, <, 2 * G_TIME_SPAN_SECOND);
   assert_inactive (device);
-  if (handler) g_signal_handler_disconnect (device, handler);
+  if (handler)
+    g_signal_handler_disconnect (device, handler);
   cancel_on_command = 0xff;
   cancel_settle = FALSE;
   hold_finger = FALSE;

@@ -3,10 +3,12 @@
 #include "drivers/goodixtls/goodix-profiles.h"
 #include "drivers/goodixtls/goodix-image.h"
 
-static void test_profiles (void)
+static void
+test_profiles (void)
 {
   const GoodixProfile *p = goodix_profile_lookup (0x55a2, "GF3206_RTSEC_APP_10062");
   const GoodixProfile *older = goodix_profile_lookup (0x55a2, "GF3206_RTSEC_APP_10052");
+
   g_assert_nonnull (p);
   g_assert_nonnull (older);
   g_assert_cmpstr (older->firmware, ==, "GF3206_RTSEC_APP_10052");
@@ -26,16 +28,19 @@ static void test_profiles (void)
   g_assert_null (goodix_profile_lookup (0x55a2, NULL));
 }
 
-static void test_wire (void)
+static void
+test_wire (void)
 {
   g_autofree guint8 *payload = g_malloc0 (G_MAXUINT16);
   g_autofree guint8 *bytes = NULL;
   guint32 length;
+
   goodix_encode_pack (GOODIX_FLAGS_TLS, payload, G_MAXUINT16, TRUE, &bytes, &length);
-  for (guint i = 0; i < 4 + G_MAXUINT16; i++) {
-    GoodixPacket p;
-    g_assert_cmpint (goodix_packet_peek (bytes, i, &p), ==, 0);
-  }
+  for (guint i = 0; i < 4 + G_MAXUINT16; i++)
+    {
+      GoodixPacket p;
+      g_assert_cmpint (goodix_packet_peek (bytes, i, &p), ==, 0);
+    }
   GoodixPacket p;
   g_assert_cmpint (goodix_packet_peek (bytes, length, &p), ==, 1);
   g_assert_cmpuint (p.length, ==, G_MAXUINT16);
@@ -47,23 +52,27 @@ static void test_wire (void)
   g_assert_cmpuint (p.consumed, ==, sizeof (padding));
 }
 
-static void test_image (void)
+static void
+test_image (void)
 {
   guint8 raw[GOODIX55X4_RAW_FRAME_SIZE];
   Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE];
   guint8 out[GOODIX55X4_OUT_WIDTH * GOODIX55X4_OUT_HEIGHT];
+
   memset (raw, 0xff, sizeof (raw));
   goodix_image_decode_frame (frame, raw);
   g_assert_cmpint (goodix_image_swipe_raw_mean (frame), ==, 4095);
   goodix_image_swipe_build_out (frame, out);
-  for (gsize i = 0; i < sizeof (out); i++) g_assert_cmpuint (out[i], ==, 255);
+  for (gsize i = 0; i < sizeof (out); i++)
+    g_assert_cmpuint (out[i], ==, 255);
   goodix_image_swipe_fpn_stretch (out);
   g_assert_cmpuint (goodix_image_swipe_out_diff (out, out), ==, 0);
   goodix_image_postprocess_frame (frame, frame);
   g_assert_cmpint (goodix_image_swipe_raw_mean (frame), ==, 0);
 }
 
-int main (int argc, char **argv)
+int
+main (int argc, char **argv)
 {
   g_test_init (&argc, &argv, NULL);
   g_test_add_func ("/goodix/profiles", test_profiles);

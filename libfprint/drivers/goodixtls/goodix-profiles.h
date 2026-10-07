@@ -7,13 +7,15 @@
  * Split out of goodix55x4.c. */
 #pragma once
 #include <glib.h>
-typedef struct {
-  guint16 pid;
-  const gchar *firmware;
-  guint width, height, crop;
-  guint reset_number, tls_settle_ms;
+typedef struct
+{
+  guint16       pid;
+  const gchar  *firmware;
+  guint         width, height, crop;
+  guint         reset_number, tls_settle_ms;
   const guint8 *config;
-  gsize config_length;
+  gsize         config_length;
 } GoodixProfile;
 /* NULL means unsupported: never guess geometry or upload a different model's config. */
-const GoodixProfile *goodix_profile_lookup (guint16 pid, const gchar *firmware);
+const GoodixProfile *goodix_profile_lookup (guint16      pid,
+                                            const gchar *firmware);
