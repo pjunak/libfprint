@@ -24,7 +24,9 @@ to fprintd over D-Bus). PAM is enabled separately with
 The package's pacman hook (`/usr/share/libalpm/hooks/goodix-fingerprint.hook`)
 runs the read-only `goodix-fingerprint-pam check` after upgrades of the managed
 PAM policies, `fprintd` or this package. It reports outdated overrides, a sudo
-`.pacnew`, and an `fprintd` that no longer resolves against this library.
+`.pacnew`, an `fprintd` that no longer resolves against this library, and an
+older drop-in (such as `/opt/fprint55a2`'s `override.conf`) that still selects
+another library.
 
 The package also includes `goodix-collect`, `goodix-evaluate`, `goodix-import-trace`,
 and the native capture/scoring helpers under `/opt/libfprint-goodix/libexec/libfprint-2`.

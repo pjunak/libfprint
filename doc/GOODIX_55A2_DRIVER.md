@@ -74,10 +74,12 @@ a finger.
    sideways drift); assembly takes about 30–100 ms.
 
 Before October 2026 the driver skipped steps 2 and 3 and stacked stripes edge to
-edge. A finger moves only a few rows between frames, so images came out three
-to five times too long, with the shading repeated every 48 rows. NBIS found
-the same artificial structure in every finger, and other fingers were
-accepted. Prints enrolled before the fix must be enrolled again.
+edge; the 55a2 bring-up had replaced an upstream cross-correlation estimator
+whose search window was too small for these frames. A finger moves only a few
+rows between frames, so images came out three to five times too long, with
+the shading repeated every 48 rows. NBIS found the same artificial structure
+in every finger, and other fingers were accepted. Prints enrolled before the
+fix must be enrolled again.
 
 **Enrollment** keeps one activation for all six swipes and reuses its calibration.
 
@@ -124,11 +126,11 @@ small capture set (see
 | libfprint thermal model | hot after 30 min of activity, 9 min to cool |
 | Contact threshold | 350 below the calibrated background mean |
 
-Accuracy has been measured only on 28 swipes of five fingers from one person
-in one session ([results](GOODIX_VALIDATION.md#reference-results)): no other
-finger scored above 33, and every swipe of the enrolled finger scored at least 66
-against the other five. That is far too little data for real false-acceptance
-and rejection rates.
+Accuracy has been measured only on one person's five fingers over two days
+([results](GOODIX_VALIDATION.md#reference-results)): none of 416 attempts with
+another finger was accepted (highest score 37), but a swipe of the enrolled
+finger on another day was often rejected. That is far too little data for real
+false-acceptance and rejection rates.
 `27c6:55b4` and `27c6:55a4` use related protocols but are not enabled; each
 needs a validated firmware profile. The unrelated `goodixtls511` sources
 (`27c6:5110`) were removed. The legacy SIGFM matcher is optional
@@ -194,8 +196,13 @@ keeps a secret key on the machine.
 
 ## Changes in this fork
 
-Relative to the driver it started from:
+Relative to the driver it started from,
+[Ravira43/libfprint](https://github.com/Ravira43/libfprint) (see the
+[README's credits](../README.md#credits)):
 
+- **Recognition:** stripes are normalised and stitched from measured motion
+  instead of stacked edge to edge, and the match threshold is 40 instead of
+  24; the old images let other fingers match (see [image processing](#lifecycle)).
 - **Lifecycle:** motion stopping and finger release are separate states;
   replies are matched to the command type, so late images or unsolicited
   `0xc6` replies cannot complete another command; timers and the USB read have

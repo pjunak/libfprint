@@ -6,14 +6,19 @@ swipe sensor that upstream libfprint does not support. It works with the normal
 `fprintd` stack: enrollment, verification, the KDE lock screen, `sudo` and polkit
 prompts.
 
+It continues **[Ravira43/libfprint](https://github.com/Ravira43/libfprint)**,
+where Ravira43 got the 55a2 working for the first time, on top of the
+community Goodix TLS driver; see [credits](#credits) and
+[what this fork changes](doc/GOODIX_55A2_DRIVER.md#changes-in-this-fork).
+
 > **Status: experimental.** It is used daily on one laptop, but recognition
 > accuracy has only been checked on one person's fingers, and only two firmware
 > versions are supported. Keep password login available.
 
-> **Upgrading from a build before October 2026? Enroll your fingers again.**
-> Older builds assembled swipe images incorrectly and could accept a finger
-> that was not enrolled. The fixed driver will not match the old prints:
-> `fprintd-delete $USER`, then `fprintd-enroll`.
+> **Upgrading from a build before October 2026, or from Ravira43/libfprint?
+> Enroll your fingers again.** Those builds assembled swipe images incorrectly
+> and could accept a finger that was not enrolled. The fixed driver will not
+> match the old prints: `fprintd-delete $USER`, then `fprintd-enroll`.
 
 ## What works
 
@@ -52,12 +57,13 @@ other distributions and rollback, are in **[INSTALL_55a2.md](INSTALL_55a2.md)**.
   writes the expected key back.
 - **Swipe, don't press.** Place the finger at one end of the sensor and draw it
   slowly across the whole length in about a second. Short swipes are rejected.
-- **Accuracy is barely measured.** Matching uses NBIS. On 28 swipes of one
-  person's five fingers, no other finger came near the match threshold
-  ([results](doc/GOODIX_VALIDATION.md#reference-results)), but that is one
-  person and one session. Try a finger you have not enrolled after enrolling;
-  [evaluation tools](doc/GOODIX_VALIDATION.md#offline-recognition-evaluation)
-  exist, and results from more readers are welcome.
+- **Accuracy is barely measured.** Matching uses NBIS. Over two days of one
+  person's swipes, no other finger was accepted in 416 attempts, but the
+  enrolled finger was often rejected on the second day
+  ([results](doc/GOODIX_VALIDATION.md#reference-results)). Try a finger you
+  have not enrolled after enrolling; reports from more people and readers are
+  the most useful contribution
+  ([evaluation tools](doc/GOODIX_VALIDATION.md#offline-recognition-evaluation)).
 - **The sensor link is not secret.** Its TLS key is the public community key,
   so the link cannot prove that a scan comes from the real reader. The driver
   therefore only accepts a reader on a built-in USB port, which stops a gadget
@@ -106,13 +112,29 @@ Security problems: please report them privately, as described in
 
 ## Credits
 
-This driver builds on the work of the
-[goodix-fp-linux-dev](https://github.com/goodix-fp-linux-dev) project (Alexander
-Meiler, Matthieu Charette and others), Ash and Natasha England-Elbro (SIGFM and
-Goodix TLS), Alireza S.N. (the 55x4 driver) and RRieger
-([Ravira43/libfprint](https://github.com/Ravira43/libfprint), the first working
-`55a2` enrollment and verification). This fork reworks the driver's lifecycle
-and error recovery, adds tests, Arch packaging and the PAM integration.
+This fork stands on a lot of other people's work:
+
+- **[Ravira43](https://github.com/Ravira43)** ([Ravira43/libfprint](https://github.com/Ravira43/libfprint),
+  committing as RRieger): the first working `27c6:55a2` support, from the
+  Windows configuration blob and the 56×176 geometry to enrollment and
+  verification, plus the [PSK restore script](https://github.com/Ravira43/goodix-fp-dump).
+  This fork started from that code.
+- **[goodix-fp-linux-dev](https://github.com/goodix-fp-linux-dev)**: the
+  reverse-engineered Goodix TLS protocol and the original `goodixtls` driver,
+  by Alexander Meiler, Matthieu Charette and others.
+- **Alireza S.N.**: the 55x4 driver this one grew from, including its sleep mode.
+- **Natasha England-Elbro** and **Matthieu Charette**: the SIGFM matcher;
+  Natasha also contributed much of the Goodix TLS driver work.
+- **Michael Teuscher**: early 55b4 support.
+- **[ElvinStarry](https://github.com/ElvinStarry/libfprint)**: the 55a2 swipe
+  imaging helpers.
+- The **[libfprint](https://gitlab.freedesktop.org/libfprint/libfprint)** and
+  **fprintd** maintainers and contributors, and NIST for NBIS.
+
+This fork (Petr Junák) reworks the driver's lifecycle and error recovery, fixes
+swipe assembly and matching, and adds the tests, the Arch package, the
+`pam_fprint_parallel` module and the setup tools. See [AUTHORS](AUTHORS) for
+copyright holders.
 
 ## License
 

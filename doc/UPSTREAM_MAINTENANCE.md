@@ -43,15 +43,18 @@ reinstate automatic deletion in the driver.
 
 ## Review groups
 
-Run `python tools/export-review-patches.py /tmp/libfprint-review` to export the complete
-local delta against HEAD, including new files, without changing the index or history.
+The rework is a series of commits on top of `072991a`, so `git log 072991a..` is
+the first review aid. To review by area instead, run
+`python tools/export-review-patches.py /tmp/libfprint-review --base 072991a`. It exports
+the complete delta between that commit and the working tree, including new files,
+without changing the index or history (without `--base`, only uncommitted changes).
 The manifest records the base and assigns each path exactly once:
 
 1. Core image/print fixes and shared/virtual-device changes.
 2. Goodix driver, protocol, transport, profiles and image processing.
 3. Optional SIGFM implementation and storage/matcher fixes.
 4. Build, tests, CI and installation metadata.
-5. Diagnostic/evaluation tools and Arch package source generation.
+5. Diagnostic/evaluation tools, the PAM module and Arch package source generation.
 6. Documentation.
 
 Apply all nonempty patches in order to the recorded base with `git apply`. These are

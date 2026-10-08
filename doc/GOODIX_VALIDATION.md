@@ -211,9 +211,10 @@ sudo python tools/collect-goodix.py /private/captures/day1-index \
 ```
 
 Stop fprintd before collection and restore it afterward. The command requests six
-swipes, saves normalized images with mode 0600 in a new mode-0700 directory, and
-creates `manifest.csv`, `session.json` (build identity, file hashes, completion
-status), and `lifecycle.jsonl`. It refuses to overwrite a session or store biometrics
+swipes (a too-short swipe is asked for again, up to three times), saves the
+assembled images with mode 0600 in a new mode-0700 directory, and creates
+`manifest.csv`, `session.json` (build identity, file hashes, completion status),
+and `lifecycle.jsonl`. It refuses to overwrite a session or store biometrics
 inside the checkout. A failed run retains its successful captures with an explicit
 failure status. When running as root the files are root-owned; evaluation needs
 access to them as well. The collector also removes retired swipe/reset/image-dump
@@ -259,13 +260,15 @@ labeled corpus is still needed to assess actual recognition quality.
 
 ### Reference results
 
-One person, one session (2026-10-07), firmware `GF3206_RTSEC_APP_10052`: 28
-swipes of five fingers (6 each of right index, right middle, right ring and left
-index; 4 of right thumb). The captures were made with the old driver, whose
-images keep every stripe unchanged, so the same swipes were also run through
-the current normalisation and stitching offline. "Best of the others" is what
-fprintd decides on: a swipe's best score against the other samples of the
-enrolled finger.
+All from one person (five fingers) on one reader, firmware
+`GF3206_RTSEC_APP_10052`. Scores are NBIS bozorth3 scores; the driver accepts
+40 or more. "Best of" is what fprintd decides on: a swipe's best score
+against the samples stored in the enrolled print.
+
+**Session 1** (2026-10-07, old driver): 28 swipes, 6 each of right index,
+right middle, right ring and left index, and 4 of the right thumb. The old
+driver's images keep every stripe unchanged, so the same swipes were also run
+through the current normalisation and stitching offline.
 
 | | Old pipeline | Current pipeline |
 | --- | --- | --- |
@@ -277,9 +280,28 @@ enrolled finger.
 | Wrong-finger pairs reaching 24 | 152 of 624 | 2 of 624 |
 | Wrong-finger pairs reaching 40 | 12 of 624 | 0 of 624 |
 
-With the old pipeline at its threshold of 24 every right-ring swipe was
-accepted as the right index. The current threshold of 40 sits above every
-wrong-finger score above and well below the enrolled finger's. A second
-session, other people's fingers and swipes from the fixed driver are still
-needed.
+With the old pipeline at its threshold of 24, every right-ring swipe was
+accepted as the right index.
 
+**Session 2** (2026-10-08, fixed driver): 30 swipes, 6 of each finger. Each
+finger's 6 swipes from one session were treated as an enrollment, like
+fprintd's six stages, and every swipe of the other fingers from both sessions
+was tried against it:
+
+| | Decisions | At threshold 40 | Scores |
+| --- | --- | --- | --- |
+| Other fingers | 416 | 0 accepted | highest 37 (right middle vs right ring); 2 reach 35 |
+| Same finger, other day | 52 | 16 accepted | 6–111 |
+| Same finger, same day (best of the other 5) | 54 | 30 accepted | 4–176 |
+| Right index enrolled on day 2, day 1 swipes | 6 | 5 accepted | 39–111 |
+
+After re-enrolling the right index with the fixed driver, `fprintd-verify`
+rejected all 9 attempts with other fingers and accepted the right index.
+
+The false acceptances are gone in this data, but the margin is smallest
+between neighbouring fingers. False rejection is the open problem: a swipe on
+another day often fails, and session 2's middle, ring and thumb swipes barely
+matched even each other (best scores 9–27, against 66–176 for the same
+fingers in session 1). Whether swipe technique or stitching causes this needs
+captures that keep the individual stripes. Two sessions of one person say
+nothing reliable about rates for other people.

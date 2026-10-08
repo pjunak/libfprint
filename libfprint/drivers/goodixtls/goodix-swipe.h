@@ -10,8 +10,8 @@
 #include "drivers_api.h"
 #include "goodix-image.h"
 
-/* Preserve the fork's recognition parameters until a representative capture
- * corpus supports changing them. Frame limits apply to a touched sensor only. */
+/* Inherited swipe-detection limits; change them only with captures to back it
+ * (doc/GOODIX_VALIDATION.md). Frame limits apply to a touched sensor only. */
 #define GOODIX_SWIPE_MIN_STRIPES 12
 #define GOODIX_SWIPE_MAX_STRIPES 60
 #define GOODIX_SWIPE_MAX_FRAMES 700

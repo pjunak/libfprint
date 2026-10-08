@@ -14,8 +14,31 @@ KWallet and GNOME Keyring, and uses the finger for everything after that:
 
 The repository contains a userspace driver and configuration blob, not a
 replacement firmware image. Recognition accuracy of this small swipe sensor
-has only been checked on one person's fingers; keep password login available. Background: [driver](doc/GOODIX_55A2_DRIVER.md),
+has only been checked on one person's fingers; keep password login available.
+Background: [driver](doc/GOODIX_55A2_DRIVER.md),
 [PAM module](doc/PAM_FPRINT_PARALLEL.md), [testing](doc/GOODIX_VALIDATION.md).
+
+---
+
+## Coming from Ravira43/libfprint or an older manual build
+
+Remove the old setup first. Its prints must go (they were made from
+incorrectly assembled images and could accept other fingers), and its drop-in
+must go too: systemd applies drop-ins in alphabetical order, so an old
+`override.conf` would override this package's `99-goodix-local.conf` and keep
+the old library loaded.
+
+```bash
+fprintd-delete "$USER"
+systemctl cat fprintd        # find drop-ins that set LD_LIBRARY_PATH
+sudo rm /etc/systemd/system/fprintd.service.d/override.conf   # if it only set LD_LIBRARY_PATH=/opt/fprint55a2/lib
+sudo rm -rf /opt/fprint55a2
+sudo systemctl daemon-reload
+```
+
+If you added `pam_fprintd.so` to `/etc/pam.d/sudo` or a display manager's
+policy by hand, remove those lines too; the setup tool below configures the
+prompts again.
 
 ---
 
@@ -261,6 +284,21 @@ The sensor is tiny and treated as a **swipe** sensor:
 Start with `goodix-fingerprint-pam status` and `journalctl -b -u fprintd`.
 The driver logs why an attempt failed (initialization, lost TLS session,
 missed sleep, port reset, long wait for an empty sensor) without debug logging.
+
+### Your finger is often not recognized
+
+- Swipe the way the [swipe technique](#swipe-technique-matters-a-lot) section
+  describes, every time: start at one end, move slowly and steadily, lift at
+  the other end. A fast swipe or one that starts in the middle covers a
+  different part of the finger than the enrolled ones.
+- Enroll in the posture you use day to day: sitting at the laptop, with the
+  hand at its usual angle.
+- Re-enroll if the first enrollment had several "too short" swipes.
+
+Recognition from day to day is the weakest part of the driver
+([measurements](doc/GOODIX_VALIDATION.md#reference-results)); reports with the
+[hardware report form](https://github.com/pjunak/libfprint/issues/new/choose)
+help improve it.
 
 ### "Unsupported Goodix firmware …"
 
