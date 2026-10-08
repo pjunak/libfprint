@@ -8,6 +8,10 @@ import re
 import subprocess
 
 
+# fprintd's own module, and this fork's combined password/fingerprint prompt.
+FINGERPRINT_MODULES = ('pam_fprintd.so', 'pam_fprint_parallel.so')
+
+
 def command(*args):
     try:
         result = subprocess.run(args, capture_output=True, text=True, timeout=10, check=False)
@@ -73,7 +77,7 @@ def collect(root=Path('/')):
     services = {name: pam_chain(name, pam_roots) for name in
                 ('plasmalogin', 'sddm', 'gdm-fingerprint', 'kde-fingerprint', 'sudo', 'polkit-1')}
     report = {'devices': devices, 'pam_auth': services,
-              'fingerprint_module_present': {k: any(Path(x.get('module', '')).name == 'pam_fprintd.so'
+              'fingerprint_module_present': {k: any(Path(x.get('module', '')).name in FINGERPRINT_MODULES
                                                      for x in v) for k, v in services.items()},
               'note': 'Module presence does not prove PAM ordering or successful authentication.'}
     if root != Path('/'):

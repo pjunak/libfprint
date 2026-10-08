@@ -158,6 +158,18 @@ class FingerprintPam(unittest.TestCase):
         (self.root / 'etc/pam.d/sudo.pacnew').unlink()
         self.assertEqual(self.run_tool('check')[0], 0)
         self.assertEqual((self.root / 'etc/pam.d/polkit-1').read_text().count(fingerprint_pam.BEGIN), 1)
+        # An older install's drop-in sorts after the package's and wins.
+        old_library = self.root / 'opt/fprint55a2/lib'
+        old_library.mkdir(parents=True)
+        (old_library / 'libfprint-2.so.2').write_text('')
+        override = self.root / 'etc/systemd/system/fprintd.service.d/override.conf'
+        override.write_text('[Service]\nEnvironment=LD_LIBRARY_PATH=/opt/fprint55a2/lib\n')
+        code, output = self.run_tool('check')
+        self.assertEqual(code, 1)
+        self.assertIn('fprintd uses /opt/fprint55a2/lib (set in', output)
+        self.assertIn('override.conf', output)
+        override.unlink()
+        self.assertEqual(self.run_tool('check')[0], 0)
         (self.root / 'etc/systemd/system/fprintd.service.d/99-goodix-local.conf').unlink()
         code, output = self.run_tool('check')
         self.assertEqual(code, 1)
@@ -244,6 +256,11 @@ class Tools(unittest.TestCase):
             self.assertEqual(len(report['pam_auth']['plasmalogin']), 1)
             (root / 'etc/pam.d/common').write_text('auth sufficient /usr/lib/security/pam_fprintd.so\n')
             self.assertTrue(diag.collect(root)['fingerprint_module_present']['plasmalogin'])
+            # The combined prompt counts too, with its bracketed control.
+            (root / 'etc/pam.d/sudo').write_text(
+                '-auth [success=ok ignore=1 conv_err=die default=1] '
+                '/opt/libfprint-goodix/lib/security/pam_fprint_parallel.so mode=tty\n')
+            self.assertTrue(diag.collect(root)['fingerprint_module_present']['sudo'])
 
     def test_evaluation_excludes_same_session_and_counts_failures(self):
         rows = [{'finger_id': 'a', 'session': '1', 'condition': 'dry'},

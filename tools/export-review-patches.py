@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Export the local working delta in review groups, without altering Git's index/history."""
+"""Export the delta against a base revision (default: uncommitted changes against HEAD)
+in review groups, without altering Git's index/history."""
 import argparse
 import json
 from pathlib import Path
@@ -11,7 +12,7 @@ GROUPS = ['01-core', '02-goodix', '03-sigfm', '04-build-tests', '05-tools-packag
 
 
 def group(path):
-    if path.startswith(('tools/', 'packaging/')):
+    if path.startswith(('tools/', 'packaging/', 'pam/')) and not path.endswith('meson.build'):
         return '05-tools-packaging'
     if path.startswith('libfprint/drivers/goodixtls/'):
         return '02-goodix'
@@ -31,12 +32,15 @@ def git(*args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
+    parser.add_argument('--base', default='HEAD',
+                        help='Revision to diff against, e.g. 072991a for the whole 55a2 rework (default: HEAD)')
     args = parser.parse_args()
     output = args.output.resolve()
     if output == ROOT or ROOT in output.parents:
         parser.error('Export outside the source tree')
     output.mkdir(parents=True, exist_ok=True)
-    tracked = set(git('diff', '--name-only', '-z', 'HEAD').decode().split('\0')) - {''}
+    base = git('rev-parse', '--verify', args.base + '^{commit}').decode().strip()
+    tracked = set(git('diff', '--name-only', '-z', base).decode().split('\0')) - {''}
     untracked = set(git('ls-files', '--others', '--exclude-standard', '-z').decode().split('\0')) - {''}
     groups = {name: [] for name in GROUPS}
     for path in sorted(tracked | untracked):
@@ -45,14 +49,14 @@ if __name__ == '__main__':
         with (output / (name + '.patch')).open('wb') as file:
             for path in paths:
                 if path in tracked:
-                    file.write(git('diff', '--binary', '--full-index', 'HEAD', '--', path))
+                    file.write(git('diff', '--binary', '--full-index', base, '--', path))
                 else:
                     patch = subprocess.run(['git', 'diff', '--no-index', '--binary', '--full-index',
                                             '--', '/dev/null', path], cwd=ROOT, capture_output=True, check=False)
                     if patch.returncode not in (0, 1):
                         raise RuntimeError(patch.stderr.decode())
                     file.write(patch.stdout)
-    (output / 'manifest.json').write_text(json.dumps({'base': git('rev-parse', 'HEAD').decode().strip(),
+    (output / 'manifest.json').write_text(json.dumps({'base': base,
         'groups': groups, 'apply': 'Apply all nonempty patches in lexical order with git apply. '
         'Groups are review units, not independently buildable commits or upstream-ready patches.'}, indent=2) + '\n')
     print(output)

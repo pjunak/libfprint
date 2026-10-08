@@ -70,6 +70,7 @@ SERVICES = {
 DEFAULT_INSTALL = ('sudo', 'polkit-1')
 
 FPRINTD = 'usr/lib/fprintd'
+PACKAGE_LIBRARY = '/opt/libfprint-goodix/lib'
 DROPIN_DIR = 'etc/systemd/system/fprintd.service.d'
 STATE_DIR = 'var/lib/goodix-fingerprint-pam'
 
@@ -145,23 +146,34 @@ def inspect(root, name):
     return report
 
 
-def selected_library(root):
-    """Library directory that the fprintd drop-ins put first, if any."""
-    selected = None
+def library_dropin(root):
+    """The library directory fprintd's drop-ins put first, and the drop-in
+    that sets it: systemd applies them in name order, so the last one wins."""
+    selected = None, None
     for conf in sorted((root / DROPIN_DIR).glob('*.conf')):
         for line in (read(conf) or '').splitlines():
             match = re.match(r'\s*Environment=.*\bLD_LIBRARY_PATH=([^\s"]+)', line)
             if match:
-                selected = match.group(1).split(':')[0]
+                selected = match.group(1).split(':')[0], conf.name
     return selected
 
 
+def selected_library(root):
+    return library_dropin(root)[0]
+
+
 def library_problems(root):
-    library = selected_library(root)
+    library, conf = library_dropin(root)
     if library is None:
         return ['fprintd has no LD_LIBRARY_PATH drop-in; the distribution libfprint has no 55a2 driver']
     if not (root / library.lstrip('/') / 'libfprint-2.so.2').exists():
         return [f'fprintd drop-in selects {library}, which has no libfprint-2.so.2']
+    # An older setup (such as Ravira43/libfprint's override.conf) sorts after
+    # this package's drop-in and keeps fprintd on the old library.
+    package = root / PACKAGE_LIBRARY.lstrip('/') / 'libfprint-2.so.2'
+    if package.exists() and library.rstrip('/') != PACKAGE_LIBRARY:
+        return [f'fprintd uses {library} (set in {DROPIN_DIR}/{conf}), not the installed package\'s '
+                f'{PACKAGE_LIBRARY}: remove or fix that drop-in, then "systemctl daemon-reload"']
     if root != Path('/') or not (root / FPRINTD).exists():
         return []
     try:
