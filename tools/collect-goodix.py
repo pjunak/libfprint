@@ -24,8 +24,9 @@ def collect(directory, smoke, finger_id, session, condition, cycles, delay_ms):
     failure = None
     with (directory / 'lifecycle.jsonl').open('x') as log:
         try:
+            # Each sample may be retried three times after a too-short swipe.
             result = subprocess.run(command, env=env, stdout=log,
-                                    timeout=cycles * (2 * delay_ms / 1000 + 60) + 30)
+                                    timeout=cycles * (2 * 4 * delay_ms / 1000 + 60) + 30)
             status = result.returncode
         except (OSError, subprocess.TimeoutExpired) as error:
             status, failure = 1, str(error)

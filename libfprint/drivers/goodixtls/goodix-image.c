@@ -6,6 +6,8 @@
  *
  * Split out of goodix55x4.c. */
 #include "goodix-image.h"
+#include <math.h>
+#include <string.h>
 
 void
 goodix_image_decode_frame (Goodix55X4Pix frame[GOODIX55X4_FRAME_SIZE],
@@ -143,4 +145,56 @@ goodix_image_swipe_out_diff (const guint8 *a, const guint8 *b)
   for (gsize i = 0; i < n; ++i)
     sum += a[i] > b[i] ? a[i] - b[i] : b[i] - a[i];
   return (guint) (sum / n);
+}
+
+/* Local contrast normalisation of one swipe stripe (SWIPE_FRAME_W x _H).
+ *
+ * The sensor's response varies strongly with position: in captures from a
+ * 55a2 the middle of a frame is about half as bright as its edges and one end
+ * is close to saturation. That shading is the same in every frame, so without
+ * this step motion estimation locks onto it and NBIS finds the same structure
+ * in every finger (measured: other fingers scoring 35-45 against an enrolled
+ * one). Subtract the local mean and divide by the local standard deviation
+ * over a window of about two ridge periods. */
+#define NORMALIZE_RADIUS 8
+#define NORMALIZE_GAIN 48.0
+#define NORMALIZE_MIN_STDDEV 4.0 /* keeps flat areas flat instead of amplifying noise */
+
+void
+goodix_image_normalize_stripe (guint8 *stripe)
+{
+  const gint w = GOODIX55X4_SWIPE_FRAME_W, h = GOODIX55X4_SWIPE_FRAME_H;
+  const gint stride = w + 1;
+  g_autofree gint64 *sum = g_new0 (gint64, stride * (h + 1));
+  g_autofree gint64 *squares = g_new0 (gint64, stride * (h + 1));
+  g_autofree guint8 *in = g_malloc (w * h);
+
+  memcpy (in, stripe, w * h);
+
+  /* Integral images: sum[y][x] covers rows < y and columns < x. */
+  for (gint y = 0; y < h; y++)
+    for (gint x = 0; x < w; x++)
+      {
+        gint64 v = in[y * w + x];
+        gint at = (y + 1) * stride + x + 1;
+        sum[at] = v + sum[at - stride] + sum[at - 1] - sum[at - stride - 1];
+        squares[at] = v * v + squares[at - stride] + squares[at - 1] - squares[at - stride - 1];
+      }
+
+  for (gint y = 0; y < h; y++)
+    for (gint x = 0; x < w; x++)
+      {
+        gint x0 = MAX (0, x - NORMALIZE_RADIUS), x1 = MIN (w, x + NORMALIZE_RADIUS + 1);
+        gint y0 = MAX (0, y - NORMALIZE_RADIUS), y1 = MIN (h, y + NORMALIZE_RADIUS + 1);
+        double n = (x1 - x0) * (y1 - y0);
+        double s = sum[y1 * stride + x1] - sum[y0 * stride + x1] -
+                   sum[y1 * stride + x0] + sum[y0 * stride + x0];
+        double q = squares[y1 * stride + x1] - squares[y0 * stride + x1] -
+                   squares[y1 * stride + x0] + squares[y0 * stride + x0];
+        double mean = s / n;
+        double stddev = sqrt (MAX (q / n - mean * mean, 0.0));
+        double z = (in[y * w + x] - mean) / (stddev + NORMALIZE_MIN_STDDEV);
+
+        stripe[y * w + x] = (guint8) CLAMP (128.0 + NORMALIZE_GAIN * z, 0.0, 255.0);
+      }
 }

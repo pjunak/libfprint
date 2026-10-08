@@ -63,8 +63,8 @@ make_stripe (const guint8 *out)
     }
   high = MAX (high, low + 1);
 
-  /* Sensor long axis becomes stripe width. This is the existing transpose
-   * and edge-to-edge geometry, not an unvalidated movement estimator. */
+  /* The sensor's long axis becomes the stripe width; the finger moves along
+   * the short axis. */
   for (guint x = 0; x < GOODIX55X4_SWIPE_FRAME_W; x++)
     for (guint y = 0; y < GOODIX55X4_SWIPE_FRAME_H; y++)
       {
@@ -72,6 +72,7 @@ make_stripe (const guint8 *out)
                      (gint) (high - low);
         stripe->data[x + y * GOODIX55X4_SWIPE_FRAME_W] = CLAMP (value, 0, 255);
       }
+  goodix_image_normalize_stripe (stripe->data);
   return stripe;
 }
 
@@ -146,27 +147,108 @@ get_pixel (struct fpi_frame_asmbl_ctx *ctx, struct fpi_frame *frame,
   return frame->data[x + y * ctx->frame_width];
 }
 
+typedef struct
+{
+  gint    dx, dy;
+  guint64 error;
+} Shift;
+
+/* Mean absolute difference (x256) between @cur and @prev displaced by
+ * (dx, dy), i.e. cur(x, y) against prev(x + dx, y + dy), over the overlap. */
+static guint64
+shift_error (const guint8 *prev, const guint8 *cur, gint dx, gint dy)
+{
+  const gint w = GOODIX55X4_SWIPE_FRAME_W, h = GOODIX55X4_SWIPE_FRAME_H;
+  const gint x0 = MAX (0, -dx), x1 = MIN (w, w - dx);
+  const gint y0 = MAX (0, -dy), y1 = MIN (h, h - dy);
+  guint64 sum = 0;
+
+  for (gint y = y0; y < y1; y++)
+    {
+      const guint8 *c = cur + y * w;
+      const guint8 *p = prev + (y + dy) * w + dx;
+      for (gint x = x0; x < x1; x++)
+        sum += ABS ((gint) c[x] - (gint) p[x]);
+    }
+  return sum * 256 / ((guint64) (x1 - x0) * (y1 - y0));
+}
+
+/* Best displacement of @cur relative to @prev for each swipe direction.
+ * Ties go to the smallest movement (featureless stripes stay in place). */
+static void
+best_shifts (const guint8 *prev, const guint8 *cur, Shift *down, Shift *up)
+{
+  down->error = up->error = G_MAXUINT64;
+  for (gint dy = 1; dy <= GOODIX_SWIPE_MAX_SHIFT_Y; dy++)
+    for (gint k = 0; k <= 2 * GOODIX_SWIPE_MAX_SHIFT_X; k++)
+      {
+        const gint dx = k % 2 ? -(k + 1) / 2 : k / 2; /* 0, -1, 1, -2, 2, ... */
+        guint64 error = shift_error (prev, cur, dx, dy);
+        if (error < down->error)
+          *down = (Shift){ dx, dy, error };
+        error = shift_error (prev, cur, dx, -dy);
+        if (error < up->error)
+          *up = (Shift){ dx, -dy, error };
+      }
+}
+
+/* Set each stripe's delta_x/delta_y from the overlap with its predecessor.
+ * Kept stripes overlap heavily (the finger moves a few rows per frame), so
+ * placing them edge to edge would repeat each ridge several times. A swipe
+ * goes one way, so pick the direction that fits the whole swipe best. */
+static void
+estimate_motion (GSList *stripes)
+{
+  guint n = g_slist_length (stripes);
+  g_autofree Shift *down = g_new (Shift, n);
+  g_autofree Shift *up = g_new (Shift, n);
+  guint64 down_total = 0, up_total = 0;
+  struct fpi_frame *prev = stripes->data;
+  guint i = 1;
+
+  for (GSList *item = stripes->next; item; item = item->next, i++)
+    {
+      struct fpi_frame *cur = item->data;
+      best_shifts (prev->data, cur->data, &down[i], &up[i]);
+      down_total += down[i].error;
+      up_total += up[i].error;
+      prev = cur;
+    }
+
+  Shift *chosen = down_total <= up_total ? down : up;
+  i = 1;
+  for (GSList *item = stripes->next; item; item = item->next, i++)
+    {
+      struct fpi_frame *frame = item->data;
+      frame->delta_x = chosen[i].dx;
+      frame->delta_y = chosen[i].dy;
+    }
+}
+
 FpImage *
-goodix_swipe_take_image (GoodixSwipe *swipe)
+goodix_swipe_assemble (GSList *stripes)
 {
   struct fpi_frame_asmbl_ctx ctx = {
     .frame_width = GOODIX55X4_SWIPE_FRAME_W,
     .frame_height = GOODIX55X4_SWIPE_FRAME_H,
-    .image_width = GOODIX55X4_SWIPE_FRAME_W,
+    .image_width = GOODIX_SWIPE_IMAGE_W,
     .get_pixel = get_pixel,
   };
 
-  g_return_val_if_fail (swipe->n_stripes >= GOODIX_SWIPE_MIN_STRIPES, NULL);
-  swipe->stripes = g_slist_reverse (swipe->stripes);
-  for (GSList *item = swipe->stripes; item; item = item->next)
-    {
-      struct fpi_frame *frame = item->data;
-      frame->delta_x = 0;
-      frame->delta_y = item == swipe->stripes ? 0 : GOODIX55X4_SWIPE_FRAME_H;
-    }
-  FpImage *image = fpi_assemble_frames (&ctx, swipe->stripes);
+  g_return_val_if_fail (stripes && stripes->next, NULL);
+  estimate_motion (stripes);
+  FpImage *image = fpi_assemble_frames (&ctx, stripes);
   image->ppmm = 500.0 / 25.4;
   image->flags |= FPI_IMAGE_COLORS_INVERTED;
+  return image;
+}
+
+FpImage *
+goodix_swipe_take_image (GoodixSwipe *swipe)
+{
+  g_return_val_if_fail (swipe->n_stripes >= GOODIX_SWIPE_MIN_STRIPES, NULL);
+  swipe->stripes = g_slist_reverse (swipe->stripes);
+  FpImage *image = goodix_swipe_assemble (swipe->stripes);
   g_slist_free_full (g_steal_pointer (&swipe->stripes), g_free);
   swipe->n_stripes = 0;
   return image;

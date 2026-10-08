@@ -10,6 +10,12 @@ checks six enrollment scans with a held finger, reloads the serialized print on
 a recreated device, and verifies recovery after cancellations and protocol errors.
 The image source is a public sample print transformed into synthetic sensor stripes;
 it is not a physical swipe recording or recognition-quality measurement.
+`goodix-recognition` swipes other drivers' public test captures across a
+simulated sensor with a strong position-dependent response, through the
+driver's normalisation, stitching and NBIS. Two enrolled fingers must match
+themselves and reject the four others. It fails for the old edge-to-edge
+pipeline and for stitching without normalisation, but it does not measure
+accuracy.
 `goodix-wire-replay.ini` is a **synthetic** firmware-command fixture.
 It exposed uninitialized reserved command bytes under GCC;
 it is not a recording from a physical reader and does not establish USB timing.
@@ -232,7 +238,7 @@ Obtain consent for any other person's captures; keep raw biometric files out of 
 ```sh
 python tools/evaluate-recognition.py /private/captures/day1-index/manifest.csv \
   /private/captures/day2-index/manifest.csv /private/captures/day1-other/manifest.csv \
-  --scorer build/tools/goodix-score --threshold=24 > /private/captures/evaluation.json
+  --scorer build/tools/goodix-score --threshold=40 > /private/captures/evaluation.json
 ```
 
 Each manifest resolves paths relative to its own directory. Duplicate paths and
@@ -250,3 +256,30 @@ The single-template evaluator is useful for comparing algorithms; it does not mo
 all six enrollment stages, PAM retries, or prove a production false-acceptance rate.
 No threshold should be loosened from the results of a small sample. A representative
 labeled corpus is still needed to assess actual recognition quality.
+
+### Reference results
+
+One person, one session (2026-10-07), firmware `GF3206_RTSEC_APP_10052`: 28
+swipes of five fingers (6 each of right index, right middle, right ring and left
+index; 4 of right thumb). The captures were made with the old driver, whose
+images keep every stripe unchanged, so the same swipes were also run through
+the current normalisation and stitching offline. "Best of the others" is what
+fprintd decides on: a swipe's best score against the other samples of the
+enrolled finger.
+
+| | Old pipeline | Current pipeline |
+| --- | --- | --- |
+| Image length | 1008–2016 rows | 239–518 rows |
+| Minutiae per image | 59–200 | 14–85 |
+| Right index, best of the other 5 | 40–104 | 66–143 |
+| Other fingers against right index, best of 6 | up to 45 (ring: 35–45) | up to 18 |
+| Other fingers, any finger enrolled, best of gallery | up to 50 | up to 33 |
+| Wrong-finger pairs reaching 24 | 152 of 624 | 2 of 624 |
+| Wrong-finger pairs reaching 40 | 12 of 624 | 0 of 624 |
+
+With the old pipeline at its threshold of 24 every right-ring swipe was
+accepted as the right index. The current threshold of 40 sits above every
+wrong-finger score above and well below the enrolled finger's. A second
+session, other people's fingers and swipes from the fixed driver are still
+needed.
+

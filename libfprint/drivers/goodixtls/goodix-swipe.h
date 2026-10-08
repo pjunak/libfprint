@@ -17,6 +17,12 @@
 #define GOODIX_SWIPE_MAX_FRAMES 700
 #define GOODIX_SWIPE_STATIC_FRAMES 4
 
+/* Motion between consecutive kept stripes: at least 8 of the 48 rows must
+ * overlap. The assembled image leaves room for sideways drift. */
+#define GOODIX_SWIPE_MAX_SHIFT_Y 40
+#define GOODIX_SWIPE_MAX_SHIFT_X 8
+#define GOODIX_SWIPE_IMAGE_W (GOODIX55X4_SWIPE_FRAME_W + 32)
+
 typedef enum {
   GOODIX_SWIPE_WAIT,
   GOODIX_SWIPE_FINGER_ON,
@@ -47,3 +53,4 @@ GoodixSwipeResult goodix_swipe_feed (GoodixSwipe         *swipe,
                                      Goodix55X4Pix       *frame,
                                      const Goodix55X4Pix *background);
 FpImage *goodix_swipe_take_image (GoodixSwipe *swipe);
+FpImage *goodix_swipe_assemble (GSList *stripes);

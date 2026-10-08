@@ -88,7 +88,7 @@ def main():
     parser.add_argument('--scorer', type=Path,
                         default=Path('/opt/libfprint-goodix/libexec/libfprint-2/goodix-score'),
                         help='Scoring executable (default: isolated Arch package helper)')
-    parser.add_argument('--threshold', type=int, default=24)
+    parser.add_argument('--threshold', type=int, default=40, help="Match threshold (default: the driver's, 40)")
     args = parser.parse_args()
     if args.threshold < 1:
         parser.error('Threshold must be positive')

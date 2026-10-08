@@ -1104,12 +1104,14 @@ fpi_device_goodixtls55x4_class_init (FpiDeviceGoodixTls55X4Class *class)
   dev_class->temp_hot_seconds = 30 * 60;
   dev_class->temp_cold_seconds = 9 * 60;
 
-  /* Historical tuning from a small capture set. Preserve the threshold;
-   * representative false-accept/false-reject testing is still required. */
-  img_dev_class->bz3_threshold = 24;
+  /* NBIS' usual threshold. On 28 swipes of five fingers from one person
+   * (doc/GOODIX_VALIDATION.md) the stitched images gave wrong fingers at most
+   * 33 and the enrolled finger at least 66 (best of five samples). The old
+   * value, 24, was tuned on edge-to-edge images and let wrong fingers in. */
+  img_dev_class->bz3_threshold = 40;
   img_dev_class->algorithm = FPI_DEVICE_ALGO_NBIS;
-  img_dev_class->img_width = GOODIX55X4_SWIPE_FRAME_W; /* 168 */
-  img_dev_class->img_height = 0;                       /* variable */
+  img_dev_class->img_width = GOODIX_SWIPE_IMAGE_W;
+  img_dev_class->img_height = 0; /* variable */
 
   img_dev_class->img_open = dev_init;
   img_dev_class->img_close = dev_deinit;

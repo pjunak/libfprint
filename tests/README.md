@@ -22,6 +22,10 @@ USB. It tests six-stage enrollment while holding the finger after movement stops
 matching a reloaded print on a recreated device, cancellation at eight lifecycle
 points and recovery from protocol/cleanup failures. Its stripes come from a public
 sample image, not a physical reader recording or an accuracy dataset.
+`goodix-recognition` swipes six public fingerprint fixtures across a simulated
+sensor with strong position-dependent shading and runs the driver's stripe
+normalisation, stitching and NBIS: enrolled fingers must match themselves and
+reject the others. It catches a return to edge-to-edge stacking, not accuracy.
 `fpi-image-device` covers activation
 recovery and enrollment updates. `capture-output` verifies private file creation,
 pixel output and refusal to overwrite files/symlinks. `tools` covers trace import,

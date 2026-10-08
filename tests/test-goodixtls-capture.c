@@ -56,6 +56,9 @@ static guint8 cancel_on_command;
 static GCancellable *test_cancel;
 static cairo_surface_t *fingerprint;
 
+/* Rows the synthetic finger moves per frame (real swipes: about 2-30). */
+#define SYNTH_SWIPE_STEP 16
+
 static unsigned int
 sensor_psk (SSL *ssl, const char *hint, char *identity, unsigned int identity_size,
             unsigned char *psk, unsigned int size)
@@ -144,11 +147,11 @@ send_frame (void)
         guint16 value = 2600;
         if (!empty)
           {
-            /* Public repository print fixture, repeated vertically to supply
-             * enough distinct stripes. This tests plumbing, not recognition
-             * accuracy or a realistic swipe velocity. */
+            /* Public repository print fixture moving SYNTH_SWIPE_STEP rows
+             * per frame, so consecutive frames overlap as on real hardware.
+             * This tests plumbing, not recognition accuracy. */
             guint px = CLAMP ((gint) y - 4, 0, GOODIX55X4_SWIPE_FRAME_W - 1);
-            guint py = (stripe * GOODIX55X4_SWIPE_FRAME_H + x) % 384;
+            guint py = (stripe * SYNTH_SWIPE_STEP + x) % 384;
             const guint8 *row = cairo_image_surface_get_data (fingerprint) +
                                 py * cairo_image_surface_get_stride (fingerprint);
             guint32 pixel;
@@ -420,8 +423,10 @@ test_capture (gconstpointer fragment)
       g_autoptr(FpImage) image = fp_device_capture_sync (device, TRUE, NULL, &error);
       g_assert_no_error (error);
       g_assert_nonnull (image);
-      g_assert_cmpuint (fp_image_get_width (image), ==, 168);
-      g_assert_cmpuint (fp_image_get_height (image), >=, 12 * 48);
+      /* 16 frames, each 16 rows further: about 48 + 15 * 16 rows. */
+      g_assert_cmpuint (fp_image_get_width (image), ==, GOODIX_SWIPE_IMAGE_W);
+      g_assert_cmpuint (fp_image_get_height (image), >=, 48 + 11 * SYNTH_SWIPE_STEP);
+      g_assert_cmpuint (fp_image_get_height (image), <=, 48 + 18 * SYNTH_SWIPE_STEP);
       g_assert_false (sensor_has_finger);
       assert_inactive (device);
       g_assert_true (fp_device_close_sync (device, NULL, &error));

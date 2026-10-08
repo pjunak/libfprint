@@ -51,9 +51,33 @@ The pure modules have no USB, timers or libfprint callbacks and are tested direc
 **Scan:** arm finger detection, then read frames at most 25 per second. A
 frame whose mean drops a fixed margin below the background counts as contact. Distinct
 frames during movement become stripes; the swipe ends when the finger is lifted
-or stops moving. 12–60 stripes are stacked edge to edge into a 168-pixel-wide
-image for NBIS. The image is handed over only after the finger has actually
-left the sensor, so the next scan never calibrates against a finger.
+or stops moving. Each 168×48 stripe is normalised (below), the finger's motion
+between consecutive stripes is estimated from their overlap, and 12–60 stripes
+are stitched into one image for NBIS. The image is handed over only after the
+finger has actually left the sensor, so the next scan never calibrates against
+a finger.
+
+**Image processing** (`goodix-image.c`, `goodix-swipe.c`):
+
+1. Subtract the empty-sensor background, crop 4 pixels on each edge, equalise
+   the four readout channels and stretch the contrast.
+2. Normalise each stripe locally: subtract the mean and divide by the standard
+   deviation over a 17×17 window (about two ridge periods). The sensor's
+   response varies strongly with position: the middle of a frame is about half
+   as bright as its edges and one end is close to saturation. This shading is
+   the same in every frame and every finger.
+3. Estimate the motion between consecutive stripes: the shift (up to 40 rows
+   along the swipe, 8 sideways) with the smallest mean difference over the
+   overlap, keeping at least 8 overlapping rows. The swipe direction that
+   fits the whole swipe best is used for every stripe.
+4. Stitch the stripes at those offsets into a 200-pixel-wide image (room for
+   sideways drift); assembly takes about 30–100 ms.
+
+Before October 2026 the driver skipped steps 2 and 3 and stacked stripes edge to
+edge. A finger moves only a few rows between frames, so images came out three
+to five times too long, with the shading repeated every 48 rows. NBIS found
+the same artificial structure in every finger, and other fingers were
+accepted. Prints enrolled before the fix must be enrolled again.
 
 **Enrollment** keeps one activation for all six swipes and reuses its calibration.
 
@@ -86,21 +110,25 @@ stale callback.
 
 ## Limits and inherited parameters
 
-These values come from earlier forks and a small capture set. They are kept
-until a representative, labeled capture corpus supports changing them (see
+Apart from the match threshold, these values come from earlier forks and a
+small capture set (see
 [offline recognition evaluation](GOODIX_VALIDATION.md#offline-recognition-evaluation)):
 
 | Parameter | Value |
 | --- | --- |
-| NBIS bozorth3 match threshold | 24 |
+| NBIS bozorth3 match threshold | 40 (NBIS' usual value; was 24) |
 | Stripes per swipe | 12 minimum, 60 maximum |
+| Stripe normalisation window | 17×17 pixels |
+| Motion between stripes | up to 40 rows along the swipe, 8 sideways |
 | Contact and release frame budgets | 700 each (empty frames do not count) |
 | libfprint thermal model | hot after 30 min of activity, 9 min to cool |
 | Contact threshold | 350 below the calibrated background mean |
 
-False acceptance and rejection rates are not known. Stripes are stacked edge
-to edge without estimating their overlap, so a slow swipe repeats ridge content
-and a fast one skips some; NBIS then matches a stretched or compressed image.
+Accuracy has been measured only on 28 swipes of five fingers from one person
+in one session ([results](GOODIX_VALIDATION.md#reference-results)): no other
+finger scored above 33, and every swipe of the enrolled finger scored at least 66
+against the other five. That is far too little data for real false-acceptance
+and rejection rates.
 `27c6:55b4` and `27c6:55a4` use related protocols but are not enabled; each
 needs a validated firmware profile. The unrelated `goodixtls511` sources
 (`27c6:5110`) were removed. The legacy SIGFM matcher is optional

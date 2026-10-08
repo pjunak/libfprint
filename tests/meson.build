@@ -288,9 +288,20 @@ if 'goodixtls' in driver_helpers
         # About 80 s normally; sanitizer builds need considerably longer.
         test('goodixtls-capture', goodixtls_capture_test, suite: ['unit-tests'], env: envs,
              timeout: 300)
+
+        goodix_recognition_test = executable('test-goodix-recognition',
+            sources: [
+                'test-goodix-recognition.c',
+                '../libfprint/drivers/goodixtls/goodix-image.c',
+                '../libfprint/drivers/goodixtls/goodix-swipe.c',
+            ],
+            dependencies: [libfprint_private_dep, cairo_dep],
+            install: false)
+        test('goodix-recognition', goodix_recognition_test, suite: ['unit-tests'], env: envs)
     else
         warning('Skipping public Goodix capture tests: Cairo is required for the sample image')
         test('goodixtls-capture', find_program('sh'), suite: ['unit-tests'], args: ['-c', 'exit 77'])
+        test('goodix-recognition', find_program('sh'), suite: ['unit-tests'], args: ['-c', 'exit 77'])
     endif
 
     # Explicit manual hardware check; never registered as an automatic test.
@@ -447,7 +458,7 @@ goodix_components = files('../libfprint/drivers/goodixtls/goodix_proto.c',
                           '../libfprint/drivers/goodixtls/goodix-profiles.c',
                           '../libfprint/drivers/goodixtls/goodix-image.c')
 components_test = executable('test-goodix-components', 'test-goodix-components.c', goodix_components,
-    include_directories: include_directories('../libfprint'), dependencies: glib_dep)
+    include_directories: include_directories('../libfprint'), dependencies: [glib_dep, mathlib_dep])
 test('goodix-components', components_test, suite: ['unit-tests'], env: envs)
 
 if get_option('fuzzing')
@@ -456,7 +467,7 @@ if get_option('fuzzing')
         error('Fuzzing requires Clang; configure with CC=clang and -Dc_args=-fsanitize=fuzzer-no-link')
     endif
     executable('fuzz-goodix', 'fuzz-goodix.c', goodix_components,
-        include_directories: include_directories('../libfprint'), dependencies: glib_dep,
+        include_directories: include_directories('../libfprint'), dependencies: [glib_dep, mathlib_dep],
         c_args: '-fsanitize=fuzzer-no-link', link_args: '-fsanitize=fuzzer')
     executable('fuzz-print', 'fuzz-print.c', dependencies: libfprint_private_dep,
         c_args: '-fsanitize=fuzzer-no-link', link_args: '-fsanitize=fuzzer')

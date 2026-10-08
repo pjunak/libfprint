@@ -13,9 +13,8 @@ KWallet and GNOME Keyring, and uses the finger for everything after that:
 | `pkexec`, `run0`, KDE administrator dialogs | `polkit-1` | The same, in the dialog |
 
 The repository contains a userspace driver and configuration blob, not a
-replacement firmware image. Recognition accuracy and the false-acceptance rate
-of this small swipe sensor have not been measured; keep password login
-available. Background: [driver](doc/GOODIX_55A2_DRIVER.md),
+replacement firmware image. Recognition accuracy of this small swipe sensor
+has only been checked on one person's fingers; keep password login available. Background: [driver](doc/GOODIX_55A2_DRIVER.md),
 [PAM module](doc/PAM_FPRINT_PARALLEL.md), [testing](doc/GOODIX_VALIDATION.md).
 
 ---
@@ -71,6 +70,11 @@ fprintd-verify
 Swipe 6 times until `enroll-completed`. Enrolling a second finger
 (`fprintd-enroll -f left-index-finger`) gives you a fallback; PAM accepts any
 enrolled finger.
+
+Then run `fprintd-verify` with a finger you did **not** enroll: it must report
+`verify-no-match`. If you are upgrading from a build before October 2026,
+delete the old prints first (`fprintd-delete $USER`); they were made from
+incorrectly assembled images and could accept other fingers.
 
 ### 4. Enable fingerprint authentication
 

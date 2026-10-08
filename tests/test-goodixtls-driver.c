@@ -484,9 +484,10 @@ test_stopped_swipe_keeps_stripes (void)
   memset (raw, 0xff, sizeof (raw)); /* lifted */
   scan_on_read_img (dev, raw, sizeof (raw), self->scan_ssm, NULL);
   g_assert_nonnull (captured_image);
-  g_assert_cmpuint (fp_image_get_width (captured_image), ==, GOODIX55X4_SWIPE_FRAME_W);
+  /* Blank stripes give no motion cue: one row each, no sideways drift. */
+  g_assert_cmpuint (fp_image_get_width (captured_image), ==, GOODIX_SWIPE_IMAGE_W);
   g_assert_cmpuint (fp_image_get_height (captured_image), ==,
-                    GOODIX_SWIPE_MIN_STRIPES * GOODIX55X4_SWIPE_FRAME_H);
+                    GOODIX55X4_SWIPE_FRAME_H + GOODIX_SWIPE_MIN_STRIPES - 1);
   g_assert_cmpuint (retries, ==, 0);
   g_assert_null (self->swipe.stripes);
   g_assert_cmpuint (finger_off_reports, ==, 1);

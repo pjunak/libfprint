@@ -33,8 +33,10 @@ These are documented design limits, not vulnerabilities:
 - A fingerprint prompt in a terminal cannot show which process is asking
   ([CVE-2024-37408](https://seclists.org/oss-sec/2024/q2/286)); see
   [pam_fprint_parallel](doc/PAM_FPRINT_PARALLEL.md#security-notes).
-- Recognition accuracy (false acceptance and rejection rates) has not been
-  measured.
+- Recognition accuracy (false acceptance and rejection rates) has only been
+  checked on one person's fingers in one session
+  ([results](doc/GOODIX_VALIDATION.md#reference-results)). A finger that is
+  not enrolled being accepted is a vulnerability: please report it.
 - Someone who opens the machine and splices into the reader's internal
   connection is not stopped.
 

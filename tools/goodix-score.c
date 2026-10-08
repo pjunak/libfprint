@@ -81,6 +81,9 @@ read_pgm (const gchar *path)
     {
       image = fp_image_new (width, height);
       image->ppmm = 500.0 / 25.4;
+      /* Same polarity as goodix_swipe_take_image(): saved captures are the
+       * raw assembled data, so score them as the driver does. */
+      image->flags |= FPI_IMAGE_COLORS_INVERTED;
       if (fread (image->data, 1, width * height, file) != width * height || fgetc (file) != EOF)
         g_clear_object (&image);
     }

@@ -7,8 +7,13 @@ swipe sensor that upstream libfprint does not support. It works with the normal
 prompts.
 
 > **Status: experimental.** It is used daily on one laptop, but recognition
-> accuracy (false accept/reject rates) has not been measured, and only two
-> firmware versions are supported. Keep password login available.
+> accuracy has only been checked on one person's fingers, and only two firmware
+> versions are supported. Keep password login available.
+
+> **Upgrading from a build before October 2026? Enroll your fingers again.**
+> Older builds assembled swipe images incorrectly and could accept a finger
+> that was not enrolled. The fixed driver will not match the old prints:
+> `fprintd-delete $USER`, then `fprintd-enroll`.
 
 ## What works
 
@@ -47,9 +52,12 @@ other distributions and rollback, are in **[INSTALL_55a2.md](INSTALL_55a2.md)**.
   writes the expected key back.
 - **Swipe, don't press.** Place the finger at one end of the sensor and draw it
   slowly across the whole length in about a second. Short swipes are rejected.
-- **Accuracy is unmeasured.** Matching uses NBIS with the threshold inherited
-  from earlier forks. [Evaluation tools](doc/GOODIX_VALIDATION.md#offline-recognition-evaluation)
-  exist; results from more readers are welcome.
+- **Accuracy is barely measured.** Matching uses NBIS. On 28 swipes of one
+  person's five fingers, no other finger came near the match threshold
+  ([results](doc/GOODIX_VALIDATION.md#reference-results)), but that is one
+  person and one session. Try a finger you have not enrolled after enrolling;
+  [evaluation tools](doc/GOODIX_VALIDATION.md#offline-recognition-evaluation)
+  exist, and results from more readers are welcome.
 - **The sensor link is not secret.** Its TLS key is the public community key,
   so the link cannot prove that a scan comes from the real reader. The driver
   therefore only accepts a reader on a built-in USB port, which stops a gadget

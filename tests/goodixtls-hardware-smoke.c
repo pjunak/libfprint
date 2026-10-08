@@ -6,6 +6,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define CAPTURE_RETRIES 3 /* per sample, for swipes the driver asks to redo */
+
 static gboolean
 save_capture (FpImage *image, const gchar *directory, guint cycle, guint attempt, GError **error)
 {
@@ -133,7 +135,7 @@ main (int argc, char **argv)
         }
       g_source_remove (guard);
       gboolean passed = TRUE;
-      for (guint attempt = 0; attempt < 2; attempt++)
+      for (guint attempt = 0, retries = 0; attempt < 2;)
         {
           g_autoptr(GCancellable) cancellable = g_cancellable_new ();
           Cancellation cancel = {cancellable, FALSE};
@@ -167,9 +169,18 @@ main (int argc, char **argv)
                    (g_get_monotonic_time () - start) / 1000.0);
           if (!passed && error)
             g_printerr ("Capture failed: %s\n", error->message);
+          /* A too-short swipe: ask for the same sample again, as fprintd would. */
+          gboolean retry = capture && !passed && error && error->domain == FP_DEVICE_RETRY &&
+                           retries < CAPTURE_RETRIES;
           g_clear_error (&error);
+          if (retry)
+            {
+              retries++;
+              continue;
+            }
           if (!passed)
             break;
+          attempt++;
         }
       guard = g_timeout_add (15000, watchdog, NULL);
       gboolean closed = fp_device_close_sync (dev, NULL, &error);

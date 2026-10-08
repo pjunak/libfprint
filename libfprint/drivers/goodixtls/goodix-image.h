@@ -34,3 +34,4 @@ void goodix_image_swipe_build_out (const Goodix55X4Pix *frame,
 void goodix_image_swipe_fpn_stretch (guint8 *image);
 guint goodix_image_swipe_out_diff (const guint8 *a,
                                    const guint8 *b);
+void goodix_image_normalize_stripe (guint8 *stripe);
