@@ -48,6 +48,14 @@ static const GoodixProfile profiles[] = {
    config_55a2, sizeof (config_55a2)},
   {0x55a2, "GF3206_RTSEC_APP_10062", 56, 176, 4, 1024, 600,
    config_55a2, sizeof (config_55a2)},
+  /* Lenovo IdeaPad 5 15ARE05 (81YQ). The reader reports GF3206_RTSEC_APP_10050,
+   * and GF3208_RTSEC_APP_10050 on the first read after power-up. Same
+   * configuration, geometry and timing as the profiles above; validated with
+   * calibration, 60-stripe captures, enrollment and verification. */
+  {0x55a2, "GF3206_RTSEC_APP_10050", 56, 176, 4, 1024, 600,
+   config_55a2, sizeof (config_55a2)},
+  {0x55a2, "GF3208_RTSEC_APP_10050", 56, 176, 4, 1024, 600,
+   config_55a2, sizeof (config_55a2)},
 };
 
 const GoodixProfile *
