@@ -2290,9 +2290,21 @@ test_driver_identify_suspend_busy_error (void)
   g_assert_null (identify_data->match);
   g_assert_error (identify_data->error, FP_DEVICE_ERROR, FP_DEVICE_ERROR_BUSY);
 
+  /* fprintd releases the device for the client that gave up, while the
+   * system is still suspended. Opening it again waits for the resume. */
+  g_assert_true (fp_device_close_sync (device, NULL, &error));
+  g_assert_no_error (error);
+  g_assert_false (fp_device_open_sync (device, NULL, &error));
+  g_assert_error (error, FP_DEVICE_ERROR, FP_DEVICE_ERROR_BUSY);
+  g_clear_error (&error);
+
   fake_dev->last_called_function = NULL;
   fp_device_resume_sync (device, NULL, &error);
   g_assert (fake_dev->last_called_function == NULL);
+  g_assert_no_error (error);
+
+  /* The next client's claim after the resume opens the device. */
+  g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
 }
 

@@ -923,7 +923,11 @@ fp_device_close (FpDevice           *device,
       return;
     }
 
-  if (priv->current_task || priv->is_suspended)
+  /* Closing is allowed while suspended. A client whose operation the suspend
+   * cancelled releases the device right away; fprintd drops the claim even
+   * when closing fails, and the device would stay open, refusing every later
+   * claim until fprintd exits. */
+  if (priv->current_task || priv->suspend_resume_task)
     {
       g_task_return_error (task,
                            fpi_device_error_new (FP_DEVICE_ERROR_BUSY));
@@ -977,7 +981,8 @@ fp_device_close_finish (FpDevice     *device,
  * code of #FP_DEVICE_ERROR_BUSY before the suspend async routine finishes.
  *
  * Any operation started while the device is suspended will fail with
- * #FP_DEVICE_ERROR_BUSY, this includes calls to open or close the device.
+ * #FP_DEVICE_ERROR_BUSY, this includes calls to open the device. Closing it
+ * remains possible, so that a client can release it.
  */
 void
 fp_device_suspend (FpDevice           *device,
