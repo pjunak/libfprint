@@ -90,6 +90,13 @@ must not suspend/reboot the host or change another user's enrollment.
    is tested directly, before a cancellation/retry has initialized the sensor.
    Test the login screen **before first password login**, then password fallback,
    lock-screen unlock and sudo. The login PAM setup is separate from sensor discovery.
+7. On a dual-boot machine with the [Windows key](../INSTALL_55a2.md#dual-boot-with-windows)
+   installed (the standalone helper, running as root, uses it too): run the
+   checks above, boot Windows and confirm Windows Hello still recognizes its
+   finger, then confirm `fprintd-verify` still works back in Linux. Installing a
+   different key must make attempts fail with `TLS with the key in
+   /etc/libfprint-goodix/windows-psk failed` in the journal; install the right
+   key again afterwards.
 
 Record each run in a table like this one; write "pending" for anything not tested:
 

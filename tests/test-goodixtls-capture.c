@@ -3,6 +3,7 @@
  * driver, TLS, swipe processing, image-device state machine and NBIS run. */
 #include "drivers_api.h"
 #include "goodix-mock-usb.h"
+#include <glib/gstdio.h>
 #include <openssl/err.h>
 #include <cairo.h>
 
@@ -55,6 +56,10 @@ static guint idle_frames_before_touch;
 static guint8 cancel_on_command;
 static GCancellable *test_cancel;
 static cairo_surface_t *fingerprint;
+/* The pairing the sensor reports and the key it uses: 32 copies of one byte,
+ * 0 being the reference key. */
+static const guint8 *sensor_hash;
+static guint8 sensor_key;
 
 /* Rows the synthetic finger moves per frame (real swipes: about 2-30). */
 #define SYNTH_SWIPE_STEP 16
@@ -65,7 +70,7 @@ sensor_psk (SSL *ssl, const char *hint, char *identity, unsigned int identity_si
 {
   g_assert_cmpuint (size, >=, 32);
   g_strlcpy (identity, "Client_identity", identity_size);
-  memset (psk, 0, 32);
+  memset (psk, sensor_key, 32);
   return 32;
 }
 
@@ -241,7 +246,7 @@ sensor_write (FpDevice *device, const guint8 *data, gsize size)
         case GOODIX_CMD_PRESET_PSK_READ:
           {
             guint8 psk[41] = {0, 7, 0, 2, 0xbb, 32};
-            memcpy (psk + 9, goodix_55x4_psk_0, 32);
+            memcpy (psk + 9, sensor_hash, 32);
             queue_reply (command, psk, sizeof (psk));
             break;
           }
@@ -359,6 +364,10 @@ setup_peer (guint fragment)
   lost_tls_swipe = FALSE;
   cancel_on_command = 0xff;
   test_cancel = NULL;
+  sensor_hash = goodix_55x4_psk_0;
+  sensor_key = 0;
+  /* A key installed on the machine running the tests must not leak in. */
+  goodix_windows_key_path = "/nonexistent/goodix-windows-psk";
   sent_data = g_byte_array_new ();
   outgoing = g_byte_array_new ();
   observe_write = sensor_write;
@@ -608,6 +617,68 @@ test_bad_reply (gconstpointer fault)
   teardown_peer ();
 }
 
+enum {
+  WINDOWS_KEY_MATCHES,
+  WINDOWS_KEY_WRONG,       /* the file matches the pairing but not the key */
+  WINDOWS_KEY_BYPASSED,    /* a key is installed but the sensor claims the reference key */
+};
+
+/* A reader paired by Windows, with its key installed by goodix-windows-key. */
+static void
+test_windows_key (gconstpointer data)
+{
+  static const guint8 windows_hash[32] = {0x23, 0xdc, 0xe6, 0xfd, 0x42};
+  guint variant = GPOINTER_TO_UINT (data);
+  g_autofree gchar *dir = g_dir_make_tmp ("goodix-key-XXXXXX", NULL);
+  g_autofree gchar *path = g_build_filename (dir, "windows-psk", NULL);
+
+  g_autoptr(GString) text = g_string_new ("psk=");
+
+  for (guint i = 0; i < GOODIX_TLS_PSK_SIZE; i++)
+    g_string_append (text, "5a");
+  g_string_append_c (text, '\n');
+  g_assert_true (g_file_set_contents (path, text->str, text->len, NULL));
+  g_assert_cmpint (g_chmod (path, 0600), ==, 0);
+
+  setup_peer (65536);
+  goodix_windows_key_path = path;
+  sensor_hash = variant == WINDOWS_KEY_BYPASSED ? goodix_55x4_psk_0 : windows_hash;
+  sensor_key = variant == WINDOWS_KEY_MATCHES ? 0x5a : variant == WINDOWS_KEY_WRONG ? 0x11 : 0;
+  g_autoptr(FpDevice) device = new_device ();
+  g_autoptr(GError) error = NULL;
+  guint guard = g_timeout_add_seconds (8, watchdog, NULL);
+  g_assert_true (fp_device_open_sync (device, NULL, &error));
+  g_assert_no_error (error);
+  if (variant != WINDOWS_KEY_MATCHES)
+    {
+      g_assert_null (fp_device_capture_sync (device, TRUE, NULL, &error));
+      if (variant == WINDOWS_KEY_WRONG)
+        {
+          g_assert_error (error, G_IO_ERROR, G_IO_ERROR_FAILED);
+          g_assert_nonnull (strstr (error->message, "TLS with the key in"));
+          sensor_key = 0x5a; /* the file now holds the reader's key */
+        }
+      else
+        {
+          g_assert_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+          g_assert_nonnull (strstr (error->message, "goodix-windows-key remove"));
+          g_assert_cmpint (g_remove (path), ==, 0); /* the key was restored on purpose */
+        }
+      g_clear_error (&error);
+      g_assert_cmpuint (usb_resets, ==, 0);
+      assert_inactive (device);
+    }
+  g_autoptr(FpImage) image = fp_device_capture_sync (device, TRUE, NULL, &error);
+  g_assert_no_error (error);
+  g_assert_nonnull (image);
+  g_assert_true (fp_device_close_sync (device, NULL, &error));
+  g_assert_no_error (error);
+  g_source_remove (guard);
+  teardown_peer ();
+  g_remove (path);
+  g_rmdir (dir);
+}
+
 static void
 test_short_swipe (void)
 {
@@ -840,6 +911,9 @@ main (int argc, char **argv)
   g_test_add_data_func ("/goodixtls/public/cancel-held-finger", GUINT_TO_POINTER (260), test_cancel_reactivate);
   g_test_add_data_func ("/goodixtls/public/lost-tls", GUINT_TO_POINTER (0), test_bad_reply);
   g_test_add_data_func ("/goodixtls/public/invalid-fdt-baseline", GUINT_TO_POINTER (1), test_bad_reply);
+  g_test_add_data_func ("/goodixtls/public/windows-key", GUINT_TO_POINTER (WINDOWS_KEY_MATCHES), test_windows_key);
+  g_test_add_data_func ("/goodixtls/public/windows-key-wrong", GUINT_TO_POINTER (WINDOWS_KEY_WRONG), test_windows_key);
+  g_test_add_data_func ("/goodixtls/public/windows-key-bypassed", GUINT_TO_POINTER (WINDOWS_KEY_BYPASSED), test_windows_key);
   g_test_add_func ("/goodixtls/public/sleep-failure-keeps-result", test_sleep_failure_keeps_result);
   g_test_add_func ("/goodixtls/public/verify-transient-retry", test_verify_transient_retry);
   g_test_add_data_func ("/goodixtls/public/rebaseline-held-finger", NULL, test_rebaseline);

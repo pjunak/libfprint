@@ -50,11 +50,14 @@ other distributions and rollback, are in **[INSTALL_55a2.md](INSTALL_55a2.md)**.
 
 ## Before you start
 
-- **Sensor key.** The driver expects the reader to be paired with the key used
-  by the Linux community tools. Windows (Windows Hello) has been observed to
-  re-pair it; the driver then reports `Invalid device PSK`. The
-  [restore procedure](INSTALL_55a2.md#invalid-device-psk-after-dual-booting-windows)
-  writes the expected key back.
+- **Sensor key and dual boot.** The driver expects the reader to be paired
+  with the key used by the Linux community tools. Windows (Windows Hello) has
+  been observed to re-pair it; the driver then reports `Invalid device PSK`.
+  On a dual-boot machine you can [install the key Windows paired the reader
+  with](INSTALL_55a2.md#dual-boot-with-windows) (you have to obtain it from
+  Windows yourself), and the reader works in both systems. Otherwise the
+  [restore procedure](INSTALL_55a2.md#restore-the-reference-key) writes the
+  expected key back.
 - **Swipe, don't press.** Place the finger at one end of the sensor and draw it
   slowly across the whole length in about a second. Short swipes are rejected.
 - **Accuracy is barely measured.** Matching uses NBIS. Over two days of one
@@ -64,12 +67,14 @@ other distributions and rollback, are in **[INSTALL_55a2.md](INSTALL_55a2.md)**.
   have not enrolled after enrolling; reports from more people and readers are
   the most useful contribution
   ([evaluation tools](doc/GOODIX_VALIDATION.md#offline-recognition-evaluation)).
-- **The sensor link is not secret.** Its TLS key is the public community key,
-  so the link cannot prove that a scan comes from the real reader. The driver
-  therefore only accepts a reader on a built-in USB port, which stops a gadget
-  plugged into an external port but not someone who opens the laptop
-  ([details](doc/GOODIX_55A2_DRIVER.md#security-of-the-usb-link)). Use the
-  fingerprint for convenience, next to a good password.
+- **The sensor link is not secret by default.** Its TLS key is the public
+  community key, so the link cannot prove that a scan comes from the real
+  reader. The driver therefore only accepts a reader on a built-in USB port,
+  which stops a gadget plugged into an external port but not someone who opens
+  the laptop ([details](doc/GOODIX_55A2_DRIVER.md#security-of-the-usb-link)).
+  With the Windows key installed, the link is protected by a secret key, as
+  far as the disk keeps it secret. Use the fingerprint for convenience, next
+  to a good password.
 - **Terminal `sudo` by fingerprint** cannot tell which prompt a swipe is meant
   for ([CVE-2024-37408](https://seclists.org/oss-sec/2024/q2/286)). Only swipe
   for a command you started.

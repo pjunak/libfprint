@@ -3,6 +3,7 @@
 """Read-only fingerprint diagnostics. Does not claim USB or read templates/images."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -10,6 +11,7 @@ import subprocess
 
 # fprintd's own module, and this fork's combined password/fingerprint prompt.
 FINGERPRINT_MODULES = ('pam_fprintd.so', 'pam_fprint_parallel.so')
+WINDOWS_KEY = 'etc/libfprint-goodix/windows-psk'
 
 
 def command(*args):
@@ -80,6 +82,9 @@ def collect(root=Path('/')):
               'fingerprint_module_present': {k: any(Path(x.get('module', '')).name in FINGERPRINT_MODULES
                                                      for x in v) for k, v in services.items()},
               'note': 'Module presence does not prove PAM ordering or successful authentication.'}
+    # Whether the reader uses the key Windows paired it with (goodix-windows-key
+    # status checks the file); never its contents.
+    report['windows_key_installed'] = os.path.lexists(root / WINDOWS_KEY)
     if root != Path('/'):
         return report
     report['display_manager'] = command('systemctl', 'show', 'display-manager.service',

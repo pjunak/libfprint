@@ -1186,7 +1186,7 @@ tls_handshake_run (FpiSsm *ssm, FpDevice *dev)
 }
 
 void
-goodix_tls (FpDevice *dev, GoodixNoneCallback callback, gpointer user_data)
+goodix_tls (FpDevice *dev, const guint8 *psk, GoodixNoneCallback callback, gpointer user_data)
 {
   FpiDeviceGoodixTlsPrivate *priv =
     fpi_device_goodixtls_get_instance_private (FPI_DEVICE_GOODIXTLS (dev));
@@ -1205,6 +1205,8 @@ goodix_tls (FpDevice *dev, GoodixNoneCallback callback, gpointer user_data)
       goodix_shutdown_tls (dev, NULL);
     }
   priv->tls_hop = g_new0 (GoodixTlsServer, 1);
+  if (psk)
+    memcpy (priv->tls_hop->psk, psk, GOODIX_TLS_PSK_SIZE);
   priv->tls_ready_callback = g_new0 (GoodixCallbackInfo, 1);
   priv->tls_ready_callback->callback = G_CALLBACK (callback);
   priv->tls_ready_callback->user_data = user_data;

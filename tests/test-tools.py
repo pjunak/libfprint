@@ -30,6 +30,7 @@ evaluation = module('evaluation', 'evaluate-recognition.py')
 trace = module('trace_import', 'import-goodix-trace.py')
 collector = module('collector', 'collect-goodix.py')
 fingerprint_pam = module('fingerprint_pam', 'goodix-fingerprint-pam.py')
+windows_key = module('windows_key', 'goodix-windows-key.py')
 
 # Vendor policies on Arch/CachyOS (plasma-login-manager 6.7.4, polkit 127, sudo 1.9.17,
 # kscreenlocker 6.7.5).
@@ -268,6 +269,137 @@ class FingerprintPam(unittest.TestCase):
         self.assertIn('needs a manual review', output)
         self.assertFalse((self.root / 'etc/pam.d/plasmalogin').exists())
         self.assertEqual((self.root / 'etc/pam.d/sudo').read_text(), DISTRO_SUDO)
+
+
+class WindowsKey(unittest.TestCase):
+    KEY = bytes([0x5a] * 32)
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root / 'etc').mkdir()
+        self.path = self.root / windows_key.KEY_FILE
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def run_tool(self, *args, key=None):
+        """Run the tool; key (bytes) is given as a file, never on the command line."""
+        out, err = io.StringIO(), io.StringIO()
+        from contextlib import redirect_stdout, redirect_stderr
+        if key is not None:
+            source = self.root / 'exported-key'
+            source.write_bytes(key)
+            args = (*args, str(source))
+        with redirect_stdout(out), redirect_stderr(err):
+            code = windows_key.main(['--root', str(self.root), *args])
+        return code, out.getvalue() + err.getvalue()
+
+    def test_install_writes_the_format_the_driver_reads(self):
+        self.assertEqual(self.run_tool('status'), (0, 'no key installed: the reader must be paired '
+                                                   'with the public reference key\n'))
+        code, output = self.run_tool('install', key=b'5A:' * 16 + b'5a ' * 15 + b'5a\n')
+        self.assertEqual(code, 0, output)
+        self.assertIn('key installed', output)
+        self.assertEqual(self.path.read_bytes(), b'psk=' + b'5a' * 32 + b'\n')
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.path.parent.stat().st_mode & 0o777, 0o755)
+        self.assertEqual(self.run_tool('status')[0], 0)
+        self.assertIn('already installed', self.run_tool('install', key=b'psk=' + b'5a' * 32 + b'\n')[1])
+        # The 32 raw bytes, and a different key, which replaces the first.
+        self.assertIn('already installed', self.run_tool('install', key=self.KEY)[1])
+        self.assertIn('key replaced', self.run_tool('install', key=b'0x' + b'a5' * 32)[1])
+        self.assertEqual(windows_key.inspect(self.path, os.geteuid()), ('valid', bytes([0xa5] * 32)))
+        self.assertEqual(sorted(path.name for path in self.path.parent.iterdir()), ['windows-psk'])
+
+    @unittest.skipUnless(os.getenv('GOODIX_TEST_DRIVER'), 'Goodix test driver is not built')
+    def test_driver_loads_installed_key(self):
+        self.assertEqual(self.run_tool('install', key=self.KEY.hex().encode())[0], 0)
+        result = subprocess.run([os.environ['GOODIX_TEST_DRIVER'], '-p', '/goodixtls/driver/windows-key-installed'],
+                                env={**os.environ, 'GOODIX_TEST_KEY_FILE': str(self.path)},
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('SKIP', result.stdout)
+
+    def test_rejects_bad_keys_and_keeps_the_installed_one(self):
+        self.assertEqual(self.run_tool('install', key=self.KEY)[0], 0)
+        for key, message in ((b'00' * 32, 'public reference key'), (bytes(32), 'public reference key'),
+                             (b'5a' * 31, '64 hexadecimal digits, got 62'),
+                             (b'5a' * 16 + b'\n', '64 hexadecimal digits, got 32'),  # not 32 raw bytes
+                             (b'5a' * 33, 'got 66'), (b'5g' * 32, '64 hexadecimal digits or 32 raw bytes'),
+                             (b'\xff' * 33, 'or 32 raw bytes'), (b'', 'or 32 raw bytes')):
+            with self.subTest(key=key):
+                code, output = self.run_tool('install', key=key)
+                self.assertEqual(code, 1)
+                self.assertIn(message, output)
+                self.assertEqual(self.path.read_bytes(), b'psk=' + b'5a' * 32 + b'\n')
+        # Typed at a prompt, text is never taken as raw bytes.
+        with self.assertRaises(windows_key.KeyFileError):
+            windows_key.parse_key(b'5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5g', allow_raw=False)
+
+    def test_status_reports_files_the_driver_refuses(self):
+        self.assertEqual(self.run_tool('install', key=self.KEY)[0], 0)
+        content = self.path.read_bytes()
+        cases = {
+            'accessible to other users': lambda: self.path.chmod(0o640),
+            'more than one name': lambda: os.link(self.path, self.root / 'second-name'),
+            'not a regular file': lambda: (self.path.unlink(), self.path.symlink_to(self.root / 'exported-key')),
+            'malformed': lambda: self.path.write_bytes(content + b'\n'),
+        }
+        for message, damage in cases.items():
+            with self.subTest(message=message):
+                damage()
+                code, output = self.run_tool('status')
+                self.assertEqual(code, 1)
+                self.assertIn(message, output)
+                self.assertIn('refuses the reader', output)
+                # Installing again replaces whatever is there with a private file.
+                self.assertEqual(self.run_tool('install', key=self.KEY)[0], 0)
+                self.assertEqual(self.run_tool('status')[0], 0)
+                (self.root / 'second-name').unlink(missing_ok=True)
+        self.path.unlink()
+        self.path.mkdir()
+        self.assertIn('not a regular file', self.run_tool('status')[1])
+        self.assertIn('is a directory', self.run_tool('install', key=self.KEY)[1])
+        self.assertIn('is a directory', self.run_tool('remove')[1])
+
+    def test_remove(self):
+        self.assertIn('no key installed', self.run_tool('remove')[1])
+        self.assertEqual(self.run_tool('install', key=self.KEY)[0], 0)
+        code, output = self.run_tool('remove')
+        self.assertEqual(code, 0)
+        self.assertIn('Invalid device PSK', output)
+        self.assertFalse(self.path.exists())
+
+    def test_install_from_standard_input(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'tools/goodix-windows-key.py'), '--root',
+                                 str(self.root), 'install'], input=self.KEY.hex().encode() + b'\n',
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(windows_key.inspect(self.path, os.geteuid()), ('valid', self.KEY))
+
+    @unittest.skipIf(os.geteuid() == 0, 'root can read anything')
+    def test_status_without_permission(self):
+        self.assertEqual(self.run_tool('install', key=self.KEY)[0], 0)
+        self.path.chmod(0)
+        self.assertEqual(self.run_tool('status'), (0, f'key installed in {self.path} (run with sudo to check it)\n'))
+        self.path.parent.chmod(0)
+        try:
+            self.assertEqual(self.run_tool('status'), (0, f'cannot check {self.path}; run with sudo\n'))
+        finally:
+            self.path.parent.chmod(0o755)
+
+    def test_key_is_never_printed(self):
+        for args in (('install',), ('status',), ('install',), ('remove',)):
+            output = self.run_tool(*args, key=self.KEY.hex().encode() if args == ('install',) else None)[1]
+            self.assertNotIn(self.KEY.hex(), output.lower())
+
+    def test_diagnose_reports_only_presence(self):
+        self.assertFalse(diag.collect(self.root)['windows_key_installed'])
+        self.assertEqual(self.run_tool('install', key=self.KEY)[0], 0)
+        report = diag.collect(self.root)
+        self.assertTrue(report['windows_key_installed'])
+        self.assertNotIn(self.KEY.hex(), json.dumps(report))
 
 
 class Tools(unittest.TestCase):

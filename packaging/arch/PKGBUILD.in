@@ -38,6 +38,8 @@ package() {
     "$pkgdir/usr/bin/goodix-import-trace"
   install -Dm755 "$srcdir/libfprint-goodix/tools/goodix-fingerprint-pam.py" \
     "$pkgdir/usr/bin/goodix-fingerprint-pam"
+  install -Dm755 "$srcdir/libfprint-goodix/tools/goodix-windows-key.py" \
+    "$pkgdir/usr/bin/goodix-windows-key"
   install -Dm644 "$srcdir/libfprint-goodix/packaging/arch/goodix-fingerprint.hook" \
     "$pkgdir/usr/share/libalpm/hooks/goodix-fingerprint.hook"
   install -Dm644 "$srcdir/libfprint-goodix/packaging/arch/fprintd-goodix.conf.example" \

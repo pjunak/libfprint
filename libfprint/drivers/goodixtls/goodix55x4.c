@@ -26,9 +26,15 @@
 #include "goodix_proto.h"
 #include "goodix-profiles.h"
 #include "goodix-image.h"
+#include "goodixtls.h"
 
 #include "goodix-swipe.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <openssl/crypto.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* Poll at most 25 frames/s; waiting for a finger must not busy-loop. */
 #define CAPTURE_INTERVAL_MS 40
@@ -73,6 +79,11 @@ struct _FpiDeviceGoodixTls55X4
   FpImage             *pending_image;
   FpDeviceRetry        pending_retry;
   GError              *sleep_error;
+
+  /* Set when the reader uses the installed key instead of the reference
+   * one. The key is held only from the key check until TLS has copied it. */
+  gboolean using_windows_key;
+  guint8   windows_psk[GOODIX_TLS_PSK_SIZE];
 };
 
 G_DECLARE_FINAL_TYPE (FpiDeviceGoodixTls55X4, fpi_device_goodixtls55x4, FPI,
@@ -158,21 +169,141 @@ check_reset (FpDevice *dev, gboolean success, guint16 number, gpointer ssm, GErr
   check_none (dev, ssm, error);
 }
 
+/* The key Windows paired the reader with, if the owner installed it with
+ * tools/goodix-windows-key.py. It is read only when the reader reports a key
+ * other than the reference one. Once a key is installed, the reader must use
+ * it: otherwise a device impersonating the reader could report the public
+ * reference key and skip the secret one. A system without one only finds the
+ * path missing. Anything at the path counts as installed, even a file the
+ * loader would refuse, and so does an error other than "missing": an
+ * installed key must fail closed. */
+static const gchar *goodix_windows_key_path = "/etc/libfprint-goodix/windows-psk";
+
+static gboolean
+goodix_windows_key_present (const gchar *path)
+{
+  struct stat info;
+
+  return lstat (path, &info) == 0 || errno != ENOENT;
+}
+
+/* "psk=<64 hex>\n". Nothing ties the file to one pairing: the TLS handshake
+ * proves whether the key is the reader's. */
+#define GOODIX_KEY_FILE_SIZE (4 + 2 * GOODIX_TLS_PSK_SIZE + 1)
+
+static gboolean
+goodix_parse_hex_key (const gchar *text, guint8 *key)
+{
+  for (guint i = 0; i < GOODIX_TLS_PSK_SIZE; i++)
+    {
+      gint high = g_ascii_xdigit_value (text[2 * i]);
+      gint low = g_ascii_xdigit_value (text[2 * i + 1]);
+
+      if (high < 0 || low < 0)
+        return FALSE;
+      key[i] = high << 4 | low;
+    }
+  return TRUE;
+}
+
+/* Loads the installed key into @psk if the file at @path is private to the
+ * current user. The key is never logged; failures leave @psk wiped. */
+static gboolean
+goodix55x4_load_windows_psk (const gchar *path, guint8 *psk, GError **error)
+{
+  gchar text[GOODIX_KEY_FILE_SIZE + 1];
+  struct stat info;
+  gsize size = 0;
+  gboolean loaded = FALSE;
+  int fd;
+
+  /* O_NONBLOCK: a FIFO planted at the path must not hang fprintd. */
+  fd = open (path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+  if (fd < 0)
+    {
+      int saved = errno;
+      if (saved == ENOENT)
+        g_set_error_literal (error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "no key for it is installed");
+      else
+        g_set_error (error, G_IO_ERROR, g_io_error_from_errno (saved), "%s cannot be opened: %s",
+                     path, g_strerror (saved));
+      goto out;
+    }
+  if (fstat (fd, &info) || !S_ISREG (info.st_mode) || info.st_nlink != 1 ||
+      info.st_uid != geteuid () || (info.st_mode & 077))
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+                   "%s is not a private file (regular, one link, owned by fprintd's user, mode 0600)", path);
+      goto out;
+    }
+  while (size < sizeof (text))
+    {
+      gssize count = read (fd, text + size, sizeof (text) - size);
+      if (count < 0 && errno == EINTR)
+        continue;
+      if (count <= 0)
+        break;
+      size += count;
+    }
+  if (size != GOODIX_KEY_FILE_SIZE || memcmp (text, "psk=", 4) ||
+      text[GOODIX_KEY_FILE_SIZE - 1] != '\n' || !goodix_parse_hex_key (text + 4, psk))
+    {
+      g_set_error (error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA, "%s is malformed", path);
+      goto out;
+    }
+  loaded = TRUE;
+
+out:
+  if (fd >= 0)
+    close (fd);
+  OPENSSL_cleanse (text, sizeof (text));
+  if (!loaded)
+    OPENSSL_cleanse (psk, GOODIX_TLS_PSK_SIZE);
+  return loaded;
+}
+
 static void
 check_preset_psk_read (FpDevice *dev, gboolean success, guint32 flags,
-                       guint8 *psk, guint16 length, gpointer ssm, GError *error)
+                       guint8 *hash, guint16 length, gpointer ssm, GError *error)
 {
+  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
+  g_autoptr(GError) key_error = NULL;
+
   /* A well-formed reply with another key is a provisioning problem (for
    * example after Windows re-paired the sensor). Retrying cannot fix it. */
+  self->using_windows_key = FALSE;
   if (!error && !success)
     error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED, "Failed to read PSK from device");
   if (!error && flags != GOODIX_55X4_PSK_FLAGS)
     error = g_error_new (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Invalid device PSK flags: 0x%08x", flags);
   if (!error && length != sizeof (goodix_55x4_psk_0))
     error = g_error_new (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Invalid device PSK hash length: %u", length);
-  if (!error && memcmp (psk, goodix_55x4_psk_0, sizeof (goodix_55x4_psk_0)))
-    error = g_error_new_literal (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
-                                 "Invalid device PSK: does not match the supported 55a2 profile");
+  if (!error && !memcmp (hash, goodix_55x4_psk_0, sizeof (goodix_55x4_psk_0)))
+    {
+      if (goodix_windows_key_present (goodix_windows_key_path))
+        {
+          error = g_error_new (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                               "Invalid device PSK: the reader reports the public reference key, but "
+                               "%s holds a key for it. If the reference key was restored on purpose, "
+                               "run \"sudo goodix-windows-key remove\"", goodix_windows_key_path);
+        }
+    }
+  else if (!error)
+    {
+      if (goodix55x4_load_windows_psk (goodix_windows_key_path, self->windows_psk, &key_error))
+        {
+          fp_dbg ("Reader is paired with another key; using the installed one");
+          self->using_windows_key = TRUE;
+        }
+      else
+        {
+          error = g_error_new (G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+                               "Invalid device PSK: the reader is paired with another key, usually by "
+                               "Windows Hello, and %s. Install that key with \"sudo goodix-windows-key "
+                               "install\" or restore the reference key (INSTALL_55a2.md)", key_error->message);
+        }
+    }
   check_none (dev, ssm, error);
 }
 
@@ -357,14 +488,29 @@ tls_activation_complete (FpDevice *dev, gpointer user_data, GError *error)
   fpi_image_device_activate_complete (FP_IMAGE_DEVICE (dev), error);
 }
 
+/* With an installed key, a failed handshake usually means the key is not the
+ * reader's: a wrong key, or Windows paired the reader again since. */
+static void
+tls_handshake_complete (FpDevice *dev, gpointer user_data, GError *error)
+{
+  if (error && FPI_DEVICE_GOODIXTLS55X4 (dev)->using_windows_key &&
+      !g_error_matches (error, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+    g_prefix_error (&error, "TLS with the key in %s failed; it may not be the reader's key, or "
+                            "Windows paired the reader again: ", goodix_windows_key_path);
+  tls_activation_complete (dev, user_data, error);
+}
+
 static void
 activate_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
 {
-  FPI_DEVICE_GOODIXTLS55X4 (dev)->activation_ssm = NULL;
+  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
+  self->activation_ssm = NULL;
   if (error)
     tls_activation_complete (dev, NULL, error);
   else
-    goodix_tls (dev, tls_activation_complete, NULL);
+    goodix_tls (dev, self->using_windows_key ? self->windows_psk : NULL, tls_handshake_complete, NULL);
+  OPENSSL_cleanse (self->windows_psk, sizeof (self->windows_psk));
 }
 
 /* Calibration uses the historical 55a2 mode/up/nav sequence. Its FDT-up
@@ -882,13 +1028,13 @@ sleep_complete (FpiSsm *ssm, FpDevice *dev, GError *error)
   fpi_image_device_deactivate_complete (FP_IMAGE_DEVICE (dev), NULL);
 }
 
-/* The TLS key shared with the sensor is the public reference key (see
- * goodix55x4.h), so the link cannot tell the real reader from a device that
- * only claims to be one. The real reader is wired to an internal port; a
- * look-alike has to arrive through an external connector, which firmware
- * describes to the kernel as removable. Refuse a reader if its port, or the
- * port of any hub between it and the computer, is removable: a fake hub must
- * not hide a fake reader behind an "unknown" port. Ports the firmware does
+/* Unless a key is installed, the TLS key shared with the sensor is the
+ * public reference key (see goodix55x4.h), so the link cannot tell the real
+ * reader from a device that only claims to be one. The real reader is wired
+ * to an internal port; a look-alike has to arrive through an external
+ * connector, which firmware describes to the kernel as removable. Refuse a
+ * reader if its port, or the port of any hub between it and the computer, is
+ * removable: a fake hub must not hide a fake reader behind an "unknown" port. Ports the firmware does
  * not describe are accepted, since nothing distinguishes them.
  * GOODIX_ALLOW_REMOVABLE_PORT=1 in fprintd's environment (a root-owned
  * systemd drop-in) accepts a reader that really is connected externally. */
@@ -1069,6 +1215,7 @@ dev_finalize (GObject *object)
   g_clear_pointer (&self->delay, g_source_destroy);
   goodix55x4_clear_capture (self);
   g_clear_error (&self->sleep_error);
+  OPENSSL_cleanse (self->windows_psk, sizeof (self->windows_psk));
   G_OBJECT_CLASS (fpi_device_goodixtls55x4_parent_class)->finalize (object);
 }
 

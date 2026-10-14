@@ -13,9 +13,11 @@ its limits, and what this fork changed. For installation see
 - Firmware `GF3206_RTSEC_APP_10052` and `GF3206_RTSEC_APP_10062` are accepted,
   both with the configuration the Windows driver uploads. Any other firmware
   is refused with `Unsupported Goodix firmware` instead of being guessed at.
-- The reader must be paired with the key this driver expects. The driver reads
-  the key's hash and refuses a different one (`Invalid device PSK`). It never
-  writes keys or firmware.
+- The reader must be paired with the public reference key, or with a key the
+  owner installed, normally the one Windows paired it with
+  ([the Windows key](#the-windows-key)). The driver reads the hash of the
+  paired key and refuses a pairing it has no key for (`Invalid device PSK`).
+  It never writes keys or firmware.
 - Frames are 56 × 176 pixels, 12 bits each; four rows and columns are cropped
   on every edge, leaving 48 × 168.
 
@@ -96,7 +98,8 @@ even if an earlier one failed.
 | Finger resting on the sensor while finger detection is configured | If the sensor takes more than 300 ms to report empty, redo calibration once |
 | Finger detection fires but nothing touches the sensor | After 50 empty frames (2 s), go back to waiting for a finger |
 | Sleep command not acknowledged | Logged; the result already reported stands; the next activation starts from scratch |
-| Unsupported firmware or a different paired key | Fail immediately, no retry |
+| Unsupported firmware, or a paired key the driver has not been given | Fail immediately, no retry |
+| Installed key fails the TLS handshake (wrong key, or Windows paired the reader again) | Fail immediately, naming the key file; no retry |
 | Reader behind a removable (external) USB port | Refuse to open it; see [built-in port check](#built-in-port-check) |
 | Reader unplugged or re-enumerated (hibernate) | Current operation fails; the next one uses the new device |
 | System suspend during a scan | libfprint cancels the operation; the next activation reinitializes. For the lock screen, see [How the lock screen works](../INSTALL_55a2.md#how-the-lock-screen-works) |
@@ -141,13 +144,14 @@ needs a validated firmware profile. The unrelated `goodixtls511` sources
 The sensor and the computer talk through a TLS session, which normally does
 two things: it keeps the images secret, and it proves that the messages come
 from the real sensor. Both rely on a key that only the two ends know. Windows
-pairs each reader with its own random key; Linux cannot obtain that key, so
-the community tools pair the reader with a reference key instead. That key is
-the same everywhere and is published in source code, and nobody has published
-a way to give the sensor any other key. (Guessing a 256-bit key is not
-feasible.)
+pairs each reader with its own random key. The community tools pair the reader
+with a reference key instead, which is the same everywhere and is published in
+source code; nobody has published a way to give the sensor any other key of
+one's choosing. (Guessing a 256-bit key is not feasible.) The driver uses the
+reference key unless the owner installs the key Windows paired the reader with
+([below](#the-windows-key)).
 
-With a public key, the link proves nothing. A small USB device programmed to
+With the public key, the link proves nothing. A small USB device programmed to
 behave like the reader could send the computer a picture of the owner's
 fingerprint, for example one lifted from a glass, and the driver would accept
 it as a scan. Someone wired into the internal connection could also record
@@ -189,10 +193,38 @@ Environment=LD_LIBRARY_PATH=/opt/libfprint-goodix/lib
 Environment=GOODIX_ALLOW_REMOVABLE_PORT=1
 ```
 
+### The Windows key
+
+On a machine that also runs Windows, the reader can keep the key Windows paired
+it with. The owner obtains that key from Windows (this project has no tool for
+that) and installs it with `goodix-windows-key`, which writes
+`psk=<64 hex digits>` to `/etc/libfprint-goodix/windows-psk`, owned by root,
+mode 0600. Then:
+
+- When the reader reports a pairing other than the reference one, the driver
+  loads the key, hands it to the TLS server for the handshake and wipes its own
+  copy; the TLS server wipes its copy when the session ends. The key is never
+  logged. Nothing is written to the reader, so Windows Hello keeps working.
+- This project does not know how the reader derives the hash it reports, so the
+  key cannot be checked against it. The TLS handshake is the check: a wrong or
+  outdated key fails it, and the error names the key file.
+- While anything exists at that path, a reader that reports the reference key
+  is refused. Otherwise a device posing as the reader could claim the public
+  key and skip the secret one. A file the driver will not use (another owner,
+  readable by other users, a symlink, a second hard link, malformed) also
+  counts as installed, so a damaged installation fails closed.
+- A device posing as the reader can no longer complete the handshake, and the
+  images on the internal cable are encrypted with a key the attacker does not
+  have. The built-in port check stays in place as a second line.
+
+The key is only as secret as the disk it is stored on. Without disk
+encryption, someone who can start another system on the machine or remove the
+disk can read it, and the link is then no better than with the public key.
+
 Treat the fingerprint as a convenience next to the password, not as a strong
 second factor. Full-disk encryption is the best general protection against
-someone with physical access, and a prerequisite for any future scheme that
-keeps a secret key on the machine.
+someone with physical access, and it is what keeps an installed Windows key
+secret.
 
 ## Changes in this fork
 
@@ -212,8 +244,11 @@ Relative to the driver it started from,
   reset for an unresponsive MCU (previously an opt-in environment option).
 - **Validation:** firmware is checked against exact versions; configuration,
   detection baselines and frame lengths are validated; readers behind
-  removable USB ports are refused (the TLS key is public, so the port is the
+  removable USB ports are refused (with the public TLS key, the port is the
   only evidence that the reader is the built-in one).
+- **Dual boot:** the reader can use the key Windows paired it with
+  (`goodix-windows-key`), so it works in both systems and the USB link is
+  protected by a secret key.
 - **Structure:** pure protocol, profile, image and swipe modules split out of
   the driver; environment options `GOODIX_USB_RESET`, `GOODIX_SWIPE_FDT` and
   `GOODIX_SAVE_DIR` removed (image collection is an explicit tool,
@@ -225,4 +260,4 @@ Relative to the driver it started from,
   TLS peer, public-API capture/enroll/verify), fuzzing, diagnostics and
   evaluation tools, an isolated Arch package, the
   [`pam_fprint_parallel`](PAM_FPRINT_PARALLEL.md) module and the
-  `goodix-fingerprint-pam` setup tool.
+  `goodix-fingerprint-pam` and `goodix-windows-key` setup tools.

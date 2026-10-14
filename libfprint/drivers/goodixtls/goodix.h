@@ -308,7 +308,10 @@ void goodix_read_tls (FpDevice         *dev,
                       GoodixTlsCallback callback,
                       gpointer          user_data);
 
+/* @psk is the reader's own GOODIX_TLS_PSK_SIZE-byte key, or NULL for the
+ * public reference key. It is copied; the caller may wipe it on return. */
 void goodix_tls (FpDevice          *dev,
+                 const guint8      *psk,
                  GoodixNoneCallback callback,
                  gpointer           user_data);
 

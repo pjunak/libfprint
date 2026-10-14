@@ -22,12 +22,17 @@
 #include <gio/gio.h>
 #include <openssl/ssl.h>
 
+#define GOODIX_TLS_PSK_SIZE (32)
+
 /* All TLS processing runs on the device's main context. Memory BIOs let USB
- * callbacks supply records without blocking on a socket or a worker thread. */
+ * callbacks supply records without blocking on a socket or a worker thread.
+ * @psk stays all zeros (the public reference key) unless the caller sets the
+ * reader's own key before init; deinit wipes it. */
 typedef struct
 {
   SSL_CTX *ssl_ctx;
   SSL     *ssl_layer;
+  guint8   psk[GOODIX_TLS_PSK_SIZE];
 } GoodixTlsServer;
 
 gboolean goodix_tls_server_init (GoodixTlsServer *self,

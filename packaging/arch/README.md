@@ -28,6 +28,12 @@ PAM policies, `fprintd` or this package. It reports outdated overrides, a sudo
 older drop-in (such as `/opt/fprint55a2`'s `override.conf`) that still selects
 another library.
 
+On a machine that dual-boots Windows, `sudo goodix-windows-key install` lets the
+reader use the key Windows paired it with (see
+[INSTALL_55a2.md](../../INSTALL_55a2.md#dual-boot-with-windows)). The key is kept in
+`/etc/libfprint-goodix/windows-psk`, outside the package, so upgrades and removal
+leave it alone; `sudo goodix-windows-key remove` deletes it.
+
 The package also includes `goodix-collect`, `goodix-evaluate`, `goodix-import-trace`,
 and the native capture/scoring helpers under `/opt/libfprint-goodix/libexec/libfprint-2`.
 Those helpers load the library from the same isolated prefix. Capture collection

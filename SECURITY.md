@@ -18,6 +18,10 @@ the `master` branch.
   `pam_faillock`, or exposes or keeps a typed password.
 - **`goodix-fingerprint-pam`** (`tools/goodix-fingerprint-pam.py`): it runs as
   root and writes `/etc/pam.d`.
+- **The Windows key**: `goodix-windows-key` (`tools/goodix-windows-key.py`)
+  runs as root and writes the reader's key to `/etc/libfprint-goodix`. Any way
+  to read that key without root, to make the driver log it, or to make the
+  driver accept a reader without it while it is installed is in scope.
 - **The `goodixtls55x4` driver**: memory-safety or logic errors when parsing
   data from the USB device.
 - **Packaging**: file permissions, the pacman hook.
@@ -26,10 +30,12 @@ the `master` branch.
 
 These are documented design limits, not vulnerabilities:
 
-- The sensor's TLS key is the public key used by the community tools, so the
-  USB link cannot prove that a scan comes from the real reader. The driver only
+- Unless the owner installs the key Windows paired the reader with, the
+  sensor's TLS key is the public key used by the community tools, so the USB
+  link cannot prove that a scan comes from the real reader. The driver only
   accepts a reader on a built-in port; see
   [Security of the USB link](doc/GOODIX_55A2_DRIVER.md#security-of-the-usb-link).
+  An installed key is only as secret as the disk it is stored on.
 - A fingerprint prompt in a terminal cannot show which process is asking
   ([CVE-2024-37408](https://seclists.org/oss-sec/2024/q2/286)); see
   [pam_fprint_parallel](doc/PAM_FPRINT_PARALLEL.md#security-notes).

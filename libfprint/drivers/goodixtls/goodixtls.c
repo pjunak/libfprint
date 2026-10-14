@@ -19,6 +19,7 @@
 
 #include "goodixtls.h"
 
+#include <openssl/crypto.h>
 #include <openssl/err.h>
 #include <string.h>
 
@@ -37,11 +38,14 @@ static unsigned int
 tls_server_psk_callback (SSL *ssl, const char *identity,
                          unsigned char *psk, unsigned int max_psk_len)
 {
-  /* The provisioned white-box key corresponds to a 32-byte zero PSK. */
-  if (max_psk_len < 32)
+  GoodixTlsServer *self = SSL_get_app_data (ssl);
+
+  /* The reference white-box key corresponds to a 32-byte zero PSK; a reader
+   * paired by Windows uses the key the driver copied into the server. */
+  if (!self || max_psk_len < GOODIX_TLS_PSK_SIZE)
     return 0;
-  memset (psk, 0, 32);
-  return 32;
+  memcpy (psk, self->psk, GOODIX_TLS_PSK_SIZE);
+  return GOODIX_TLS_PSK_SIZE;
 }
 
 gboolean
@@ -51,6 +55,7 @@ goodix_tls_server_deinit (GoodixTlsServer *self, GError **error)
    * Waiting for close_notify here would hang when the sensor has gone away. */
   g_clear_pointer (&self->ssl_layer, SSL_free);
   g_clear_pointer (&self->ssl_ctx, SSL_CTX_free);
+  OPENSSL_cleanse (self->psk, sizeof (self->psk));
   return TRUE;
 }
 
@@ -84,6 +89,7 @@ goodix_tls_server_init (GoodixTlsServer *self, GError **error)
   BIO_set_mem_eof_return (input, -1);
   BIO_set_mem_eof_return (output, -1);
   SSL_set_bio (self->ssl_layer, input, output); /* transfers both BIOs */
+  SSL_set_app_data (self->ssl_layer, self);
   SSL_set_accept_state (self->ssl_layer);
   return TRUE;
 

@@ -122,6 +122,8 @@ new_device (void)
   usb_resets = 0;
   retries = 0;
   finger_off_reports = 0;
+  /* A key installed on the machine running the tests must not leak in. */
+  goodix_windows_key_path = "/nonexistent/goodix-windows-psk";
   g_assert_null (reported_error);
   g_assert_null (captured_image);
   return g_object_new (fpi_device_goodixtls55x4_get_type (), NULL);
@@ -855,7 +857,7 @@ test_busy_tls_requests (void)
 
   /* A second handshake while one runs is refused, not asserted. */
   priv->tls_ready_callback = pending;
-  goodix_tls (dev, tls_completion, NULL);
+  goodix_tls (dev, NULL, tls_completion, NULL);
   g_assert_cmpuint (completions, ==, 1);
   g_assert_error (reported_error, G_IO_ERROR, G_IO_ERROR_PENDING);
   g_clear_error (&reported_error);
@@ -930,6 +932,216 @@ test_builtin_port_policy (void)
   /* Emulated devices have no USB device to check. */
   dev = new_device ();
   g_assert_true (goodix_check_builtin_port (dev, NULL));
+}
+
+/* Any hash other than the reference one, as a reader paired by Windows reports. */
+static const guint8 windows_hash[GOODIX_TLS_PSK_SIZE] = {0x23, 0xdc, 0xe6, 0xfd, 0x01, 0x02};
+
+static gchar *
+write_key_file (const gchar *dir, const gchar *name, guint8 key, const gchar *tail)
+{
+  g_autoptr(GString) text = g_string_new ("psk=");
+  gchar *path = g_build_filename (dir, name, NULL);
+
+  for (guint i = 0; i < GOODIX_TLS_PSK_SIZE; i++)
+    g_string_append_printf (text, "%02X", key);
+  g_string_append (text, tail);
+  g_assert_true (g_file_set_contents (path, text->str, text->len, NULL));
+  g_assert_cmpint (g_chmod (path, 0600), ==, 0);
+  return path;
+}
+
+static void
+assert_key_refused (const gchar *path, gint code)
+{
+  guint8 psk[GOODIX_TLS_PSK_SIZE];
+  const guint8 wiped[GOODIX_TLS_PSK_SIZE] = {0};
+
+  g_autoptr(GError) error = NULL;
+
+  memset (psk, 0x77, sizeof (psk));
+  g_assert_false (goodix55x4_load_windows_psk (path, psk, &error));
+  if (code >= 0)
+    g_assert_error (error, G_IO_ERROR, code);
+  else
+    g_assert_nonnull (error);
+  g_assert_cmpmem (psk, sizeof (psk), wiped, sizeof (wiped));
+}
+
+static void
+test_windows_key_file (void)
+{
+  g_autofree gchar *dir = g_dir_make_tmp ("goodix-key-XXXXXX", NULL);
+  g_autofree gchar *good = write_key_file (dir, "good", 0x5a, "\n");
+  g_autofree gchar *trailing = write_key_file (dir, "trailing", 0x5a, "\n\n");
+  g_autofree gchar *unterminated = write_key_file (dir, "unterminated", 0x5a, "");
+  g_autofree gchar *shared = write_key_file (dir, "shared", 0x5a, "\n");
+  g_autofree gchar *linked = write_key_file (dir, "linked", 0x5a, "\n");
+  g_autofree gchar *hardlink = g_build_filename (dir, "hardlink", NULL);
+  g_autofree gchar *symlinked = g_build_filename (dir, "symlink", NULL);
+  g_autofree gchar *fifo = g_build_filename (dir, "fifo", NULL);
+  g_autofree gchar *missing = g_build_filename (dir, "missing", NULL);
+  g_autofree gchar *badhex = g_build_filename (dir, "badhex", NULL);
+  g_autofree gchar *text = NULL;
+  guint8 psk[GOODIX_TLS_PSK_SIZE];
+  guint8 expected[GOODIX_TLS_PSK_SIZE];
+
+  g_autoptr(GError) error = NULL;
+
+  memset (expected, 0x5a, sizeof (expected));
+  g_assert_true (goodix55x4_load_windows_psk (good, psk, &error));
+  g_assert_no_error (error);
+  g_assert_cmpmem (psk, sizeof (psk), expected, sizeof (expected));
+  g_assert_true (goodix_windows_key_present (good));
+
+  /* Nothing at the path at all. */
+  assert_key_refused (missing, G_IO_ERROR_NOT_FOUND);
+  g_assert_false (goodix_windows_key_present (missing));
+  /* Exactly the format goodix-windows-key writes. */
+  assert_key_refused (trailing, G_IO_ERROR_INVALID_DATA);
+  assert_key_refused (unterminated, G_IO_ERROR_INVALID_DATA);
+  g_assert_true (g_file_get_contents (good, &text, NULL, NULL));
+  text[10] = 'g';
+  g_assert_true (g_file_set_contents (badhex, text, -1, NULL));
+  g_assert_cmpint (g_chmod (badhex, 0600), ==, 0);
+  assert_key_refused (badhex, G_IO_ERROR_INVALID_DATA);
+  /* Readable by others, a second name, a symlink, a FIFO (must not block). */
+  g_assert_cmpint (g_chmod (shared, 0640), ==, 0);
+  assert_key_refused (shared, G_IO_ERROR_PERMISSION_DENIED);
+  g_assert_cmpint (link (linked, hardlink), ==, 0);
+  assert_key_refused (linked, G_IO_ERROR_PERMISSION_DENIED);
+  g_assert_cmpint (symlink (good, symlinked), ==, 0);
+  assert_key_refused (symlinked, -1);
+  g_assert_true (goodix_windows_key_present (symlinked));
+  g_assert_cmpint (mkfifo (fifo, 0600), ==, 0);
+  assert_key_refused (fifo, G_IO_ERROR_PERMISSION_DENIED);
+  assert_key_refused (dir, G_IO_ERROR_PERMISSION_DENIED);
+  remove_tree (dir);
+}
+
+/* tests/test-tools.py runs this on a file goodix-windows-key wrote for the
+ * key 32 x 0x5a, so the tool and the driver agree on the format. */
+static void
+test_windows_key_installed (void)
+{
+  const gchar *path = g_getenv ("GOODIX_TEST_KEY_FILE");
+  guint8 psk[GOODIX_TLS_PSK_SIZE];
+  guint8 expected[GOODIX_TLS_PSK_SIZE];
+
+  g_autoptr(GError) error = NULL;
+
+  if (!path)
+    {
+      g_test_skip ("GOODIX_TEST_KEY_FILE is not set");
+      return;
+    }
+  memset (expected, 0x5a, sizeof (expected));
+  g_assert_true (goodix55x4_load_windows_psk (path, psk, &error));
+  g_assert_no_error (error);
+  g_assert_cmpmem (psk, sizeof (psk), expected, sizeof (expected));
+}
+
+static GError *ssm_error;
+static gboolean ssm_done;
+
+static void
+record_ssm (FpiSsm *ssm, FpDevice *dev, GError *error)
+{
+  ssm_done = TRUE;
+  ssm_error = error;
+}
+
+/* Feeds one key-hash reply to the activation step. Returns NULL if
+ * activation moved on, or the error it failed with. */
+static GError *
+check_key (FpDevice *dev, const guint8 *hash)
+{
+  FpiSsm *ssm = fpi_ssm_new (dev, idle_state, 2);
+
+  ssm_done = FALSE;
+  ssm_error = NULL;
+  fpi_ssm_start (ssm, record_ssm);
+  check_preset_psk_read (dev, TRUE, GOODIX_55X4_PSK_FLAGS, (guint8 *) hash, GOODIX_TLS_PSK_SIZE, ssm, NULL);
+  if (!ssm_done)
+    {
+      g_assert_cmpint (fpi_ssm_get_cur_state (ssm), ==, 1);
+      fpi_ssm_mark_completed (ssm);
+    }
+  return g_steal_pointer (&ssm_error);
+}
+
+static void
+test_windows_key_selection (void)
+{
+  g_autofree gchar *dir = g_dir_make_tmp ("goodix-key-XXXXXX", NULL);
+  g_autofree gchar *path = write_key_file (dir, "windows-psk", 0x5a, "\n");
+  g_autofree gchar *missing = g_build_filename (dir, "missing", NULL);
+
+  g_autoptr(FpDevice) dev = new_device ();
+  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+  guint8 expected[GOODIX_TLS_PSK_SIZE];
+  const guint8 wiped[GOODIX_TLS_PSK_SIZE] = {0};
+  GError *error;
+
+  /* The reference key, nothing installed: today's path. */
+  goodix_windows_key_path = missing;
+  g_assert_null (check_key (dev, goodix_55x4_psk_0));
+  g_assert_false (self->using_windows_key);
+
+  /* A reader paired by Windows, with its key installed. */
+  goodix_windows_key_path = path;
+  g_assert_null (check_key (dev, windows_hash));
+  g_assert_true (self->using_windows_key);
+  memset (expected, 0x5a, sizeof (expected));
+  g_assert_cmpmem (self->windows_psk, sizeof (self->windows_psk), expected, sizeof (expected));
+  /* Handing it to TLS (or failing first) wipes the driver's copy. */
+  activate_complete (NULL, dev, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED, "reset failed"));
+  g_assert_cmpmem (self->windows_psk, sizeof (self->windows_psk), wiped, sizeof (wiped));
+  g_assert_error (reported_error, G_IO_ERROR, G_IO_ERROR_FAILED);
+  g_clear_error (&reported_error);
+
+  /* Once a key is installed, a reader claiming the public key is refused. */
+  error = check_key (dev, goodix_55x4_psk_0);
+  g_assert_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+  g_assert_nonnull (strstr (error->message, "goodix-windows-key remove"));
+  g_assert_false (self->using_windows_key);
+  g_clear_error (&error);
+
+  /* Paired by Windows, nothing installed: name both ways out. */
+  goodix_windows_key_path = missing;
+  error = check_key (dev, windows_hash);
+  g_assert_error (error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+  g_assert_nonnull (strstr (error->message, "no key for it is installed"));
+  g_assert_nonnull (strstr (error->message, "goodix-windows-key"));
+  g_assert_nonnull (strstr (error->message, "reference key"));
+  g_assert_false (self->using_windows_key);
+  g_clear_error (&error);
+  remove_tree (dir);
+}
+
+static void
+test_windows_key_handshake_hint (void)
+{
+  g_autoptr(FpDevice) dev = new_device ();
+  FpiDeviceGoodixTls55X4 *self = FPI_DEVICE_GOODIXTLS55X4 (dev);
+
+  self->using_windows_key = TRUE;
+  tls_handshake_complete (dev, NULL, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED, "bad record mac"));
+  g_assert_error (reported_error, G_IO_ERROR, G_IO_ERROR_FAILED);
+  g_assert_nonnull (strstr (reported_error->message, "TLS with the key in"));
+  g_assert_nonnull (strstr (reported_error->message, "bad record mac"));
+  g_clear_error (&reported_error);
+
+  /* Neither the reference key nor a cancellation gets the hint. */
+  self->using_windows_key = FALSE;
+  tls_handshake_complete (dev, NULL, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_FAILED, "bad record mac"));
+  g_assert_cmpstr (reported_error->message, ==, "bad record mac");
+  g_clear_error (&reported_error);
+  self->using_windows_key = TRUE;
+  action_cancelled = TRUE;
+  tls_handshake_complete (dev, NULL, g_error_new_literal (G_IO_ERROR, G_IO_ERROR_CANCELLED, "cancelled"));
+  g_assert_cmpstr (reported_error->message, ==, "cancelled");
+  g_clear_error (&reported_error);
 }
 
 static void
@@ -1422,6 +1634,10 @@ main (int argc, char **argv)
   g_test_add_data_func ("/goodixtls/driver/usb-reset-read-stuck", GINT_TO_POINTER (1), test_usb_reset_waits_for_read);
   g_test_add_func ("/goodixtls/driver/close-waits-for-read", test_close_waits_for_read);
   g_test_add_func ("/goodixtls/driver/builtin-port-policy", test_builtin_port_policy);
+  g_test_add_func ("/goodixtls/driver/windows-key-file", test_windows_key_file);
+  g_test_add_func ("/goodixtls/driver/windows-key-installed", test_windows_key_installed);
+  g_test_add_func ("/goodixtls/driver/windows-key-selection", test_windows_key_selection);
+  g_test_add_func ("/goodixtls/driver/windows-key-handshake-hint", test_windows_key_handshake_hint);
   g_test_add_func ("/goodixtls/driver/busy-tls-requests", test_busy_tls_requests);
   g_test_add_func ("/goodixtls/driver/transient-scan-retry", test_transient_scan_retry);
   g_test_add_func ("/goodixtls/driver/rebaseline-after-held-finger", test_rebaseline_after_held_finger);

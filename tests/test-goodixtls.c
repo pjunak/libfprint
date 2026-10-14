@@ -16,17 +16,19 @@ client_psk (SSL *ssl, const char *hint, char *identity,
 {
   g_strlcpy (identity, "test sensor", identity_len);
   g_assert_cmpuint (psk_len, >=, 32);
-  memset (psk, GPOINTER_TO_INT (SSL_get_app_data (ssl)), 32);
+  memset (psk, GPOINTER_TO_UINT (SSL_get_app_data (ssl)), 32);
   return 32;
 }
 
+/* Each side's key is 32 copies of one byte; 0 is the reference key. */
 static void
-pair_init (TlsPair *pair, gboolean wrong_key)
+pair_init (TlsPair *pair, guint8 server_key, guint8 client_key)
 {
   g_autoptr(GError) error = NULL;
   BIO *input = BIO_new (BIO_s_mem ());
   BIO *output = BIO_new (BIO_s_mem ());
 
+  memset (pair->server.psk, server_key, sizeof (pair->server.psk));
   g_assert_true (goodix_tls_server_init (&pair->server, &error));
   g_assert_no_error (error);
   pair->ctx = SSL_CTX_new (TLS_client_method ());
@@ -38,7 +40,7 @@ pair_init (TlsPair *pair, gboolean wrong_key)
   SSL_CTX_set_psk_client_callback (pair->ctx, client_psk);
   pair->client = SSL_new (pair->ctx);
   g_assert_nonnull (pair->client);
-  SSL_set_app_data (pair->client, GINT_TO_POINTER (wrong_key));
+  SSL_set_app_data (pair->client, GUINT_TO_POINTER (client_key));
   BIO_set_mem_eof_return (input, -1);
   BIO_set_mem_eof_return (output, -1);
   SSL_set_bio (pair->client, input, output);
@@ -92,23 +94,40 @@ test_handshake (gconstpointer data)
   TlsPair pair = {0};
 
   g_autoptr(GError) error = NULL;
-  pair_init (&pair, FALSE);
+  pair_init (&pair, 0, 0);
   g_assert_true (pair_handshake (&pair, GPOINTER_TO_UINT (data), &error));
   g_assert_no_error (error);
   pair_clear (&pair);
 }
 
 static void
-test_wrong_key (void)
+test_wrong_key (gconstpointer server_key)
 {
   TlsPair pair = {0};
 
   g_autoptr(GError) error = NULL;
-  pair_init (&pair, TRUE);
+  /* The reference server against another key, and a reader's own key
+   * against a reader still on the reference key. */
+  pair_init (&pair, GPOINTER_TO_UINT (server_key), server_key ? 0 : 1);
   g_assert_false (pair_handshake (&pair, 8192, &error));
   g_assert_error (error, G_IO_ERROR, G_IO_ERROR_FAILED);
   g_assert_nonnull (error->message);
   pair_clear (&pair);
+}
+
+/* A reader paired by Windows uses its own key; deinit must wipe it. */
+static void
+test_own_key (void)
+{
+  TlsPair pair = {0};
+  const guint8 wiped[GOODIX_TLS_PSK_SIZE] = {0};
+
+  g_autoptr(GError) error = NULL;
+  pair_init (&pair, 0x5a, 0x5a);
+  g_assert_true (pair_handshake (&pair, 8192, &error));
+  g_assert_no_error (error);
+  pair_clear (&pair);
+  g_assert_cmpmem (pair.server.psk, sizeof (pair.server.psk), wiped, sizeof (wiped));
 }
 
 static void
@@ -139,7 +158,7 @@ test_image (gconstpointer data)
   gboolean corrupt = GPOINTER_TO_INT (data);
   int count;
 
-  pair_init (&pair, FALSE);
+  pair_init (&pair, 0, 0);
   g_assert_true (pair_handshake (&pair, 8192, &error));
   for (guint i = 0; i < sizeof (image); i++)
     image[i] = i % 251;
@@ -176,7 +195,9 @@ main (int argc, char **argv)
   g_test_add_data_func ("/goodixtls/handshake/whole", GUINT_TO_POINTER (8192), test_handshake);
   g_test_add_data_func ("/goodixtls/handshake/fragmented", GUINT_TO_POINTER (7), test_handshake);
   g_test_add_data_func ("/goodixtls/handshake/bytewise", GUINT_TO_POINTER (1), test_handshake);
-  g_test_add_func ("/goodixtls/handshake/wrong-key", test_wrong_key);
+  g_test_add_data_func ("/goodixtls/handshake/wrong-key", NULL, test_wrong_key);
+  g_test_add_data_func ("/goodixtls/handshake/stale-own-key", GUINT_TO_POINTER (0x5a), test_wrong_key);
+  g_test_add_func ("/goodixtls/handshake/own-key", test_own_key);
   g_test_add_func ("/goodixtls/handshake/abort-repeated", test_aborted_handshake);
   g_test_add_data_func ("/goodixtls/image/multiple-records", GINT_TO_POINTER (FALSE), test_image);
   g_test_add_data_func ("/goodixtls/image/corrupt-record", GINT_TO_POINTER (TRUE), test_image);

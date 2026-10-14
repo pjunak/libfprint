@@ -282,6 +282,79 @@ and use the lines from [its documentation](doc/PAM_FPRINT_PARALLEL.md#configurat
 
 ---
 
+## Dual boot with Windows
+
+Windows (Windows Hello) has been observed to pair the reader with a key of its
+own, replacing the reference key this driver uses by default. Linux then
+reports `Invalid device PSK`. There are two ways to continue:
+
+- **Use the Windows key (recommended for dual boot).** Install the key Windows
+  paired the reader with. Linux then talks to the reader with the same key as
+  Windows: the reader works in both systems without re-pairing, and the USB
+  link is protected by a key only your machine has instead of the public one
+  ([details](doc/GOODIX_55A2_DRIVER.md#the-windows-key)).
+- **[Restore the reference key](#restore-the-reference-key).** Windows Hello
+  fingerprint sign-in then stops working until Windows pairs the reader again.
+
+Fingerprints are enrolled separately in each system either way. Your Linux
+enrollment stays valid when the key changes.
+
+### Install the Windows key
+
+This project does not extract the key: you need the reader's 32-byte key from
+your Windows installation, as 64 hexadecimal digits or as the 32 raw bytes in a
+file. Treat it like a password. With it, a device posing as the reader can
+pass as the real one.
+
+```bash
+sudo goodix-windows-key install windows-key.txt
+goodix-windows-key status
+fprintd-verify
+```
+
+(From a source checkout without the package: `sudo python3 tools/goodix-windows-key.py install windows-key.txt`.)
+
+Spaces or colons between the bytes are fine. Without a file the tool asks for
+the key and does not echo it. Never put the key itself on the command line:
+other users can see command lines, and the shell keeps a history. Delete the
+exported copy afterwards unless you keep it somewhere safe.
+
+The key is stored in `/etc/libfprint-goodix/windows-psk`, readable only by
+root. fprintd reads it at the start of every fingerprint attempt, so no
+restart is needed. Afterwards:
+
+- **If Windows pairs the reader again**, or the key was wrong, attempts fail and
+  `journalctl -u fprintd` shows `TLS with the key in /etc/libfprint-goodix/windows-psk failed`.
+  Obtain the current key and install it again.
+- **If you restore the reference key**, run `sudo goodix-windows-key remove`.
+  While a key is installed the driver refuses a reader that reports the public
+  reference key, so a device posing as the reader cannot fall back to it.
+- `goodix-windows-key status` (with `sudo`, to check the file's contents)
+  reports a key file the driver would refuse; installing the key again fixes it.
+
+The key is only as secret as the disk: without disk encryption, someone who can
+start another system on the laptop or remove the disk can read it.
+
+### Restore the reference key
+
+The original recovery procedure uses an external
+[restore script](https://github.com/Ravira43/goodix-fp-dump/blob/master/restore_psk_55a2.py).
+It writes persistent sensor key material; inspect it and confirm the USB model first:
+
+```bash
+git clone https://github.com/Ravira43/goodix-fp-dump.git
+cd goodix-fp-dump
+python3 -m venv .venv
+.venv/bin/pip install pyusb
+sudo systemctl stop fprintd
+sudo .venv/bin/python restore_psk_55a2.py   # writes PSK_WHITE_BOX, verifies hash
+sudo systemctl start fprintd
+```
+
+If you had installed a Windows key, run `sudo goodix-windows-key remove` as well.
+
+---
+
 ## Swipe technique (matters a lot)
 
 The sensor is tiny and treated as a **swipe** sensor:
@@ -323,21 +396,14 @@ with the original 55a2 configuration. Another version needs a validated profile.
 
 ### "Invalid device PSK" after dual-booting Windows
 
-Windows (Windows Hello) has been observed to re-pair the sensor with a new key.
-Avoid enrolling or using the reader in Windows. To restore the key this driver
-expects, the original recovery procedure uses an external
-[restore script](https://github.com/Ravira43/goodix-fp-dump/blob/master/restore_psk_55a2.py).
-It writes persistent sensor key material; inspect it and confirm the USB model first:
+The reader is paired with a key the driver has not been given, usually by
+Windows. Install that key or restore the reference one; see
+[Dual boot with Windows](#dual-boot-with-windows).
 
-```bash
-git clone https://github.com/Ravira43/goodix-fp-dump.git
-cd goodix-fp-dump
-python3 -m venv .venv
-.venv/bin/pip install pyusb
-sudo systemctl stop fprintd
-sudo .venv/bin/python restore_psk_55a2.py   # writes PSK_WHITE_BOX, verifies hash
-sudo systemctl start fprintd
-```
+If the message says the reader reports the public reference key although a key
+is installed, and you restored the reference key, run
+`sudo goodix-windows-key remove`. If you did not, keep the key: something other
+than your Windows-paired reader is answering.
 
 This error is not retried; it fails each attempt immediately.
 
@@ -379,7 +445,7 @@ Retired; they have no effect. Remove them from old service configuration. For
 private capture collection use `tools/collect-goodix.py` as described in the
 [validation guide](doc/GOODIX_VALIDATION.md).
 
-For a read-only report of device, service and PAM state:
+For a read-only report of device, service, PAM and key state:
 `python tools/goodix-diagnose.py`. For driver debug output, run the standalone
 helper with `G_MESSAGES_DEBUG=all`.
 
@@ -390,6 +456,7 @@ helper with `G_MESSAGES_DEBUG=all`.
 ```bash
 sudo goodix-fingerprint-pam uninstall
 fprintd-delete "$USER"        # optional, while the driver still works
+sudo goodix-windows-key remove   # if you installed the Windows key
 sudo rm /etc/systemd/system/fprintd.service.d/99-goodix-local.conf
 sudo systemctl daemon-reload && sudo systemctl restart fprintd
 sudo pacman -R libfprint-goodix-local
