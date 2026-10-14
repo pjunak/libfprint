@@ -26,7 +26,7 @@ community Goodix TLS driver; see [credits](#credits) and
 | --- | --- |
 | Reader | USB `27c6:55a2`, firmware `GF3206_RTSEC_APP_10052` or `GF3206_RTSEC_APP_10062` |
 | fprintd | Enroll (6 swipes), verify, identify, saved prints across reboots |
-| Lock screen | KDE `kde-fingerprint`; the driver reinitializes the reader after suspend and hibernate |
+| Lock screen | KDE `kde-fingerprint`; the driver reinitializes the reader after suspend and hibernate, and the fingerprint stays available after a sleep |
 | sudo, pkexec, run0, KDE admin dialogs | One prompt that accepts the password **or** a finger, whichever comes first ([`pam_fprint_parallel`](doc/PAM_FPRINT_PARALLEL.md)) |
 | Login screen | Password by default (it also unlocks KWallet and GNOME Keyring); fingerprint optional |
 

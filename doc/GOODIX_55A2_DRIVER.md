@@ -99,7 +99,7 @@ even if an earlier one failed.
 | Unsupported firmware or a different paired key | Fail immediately, no retry |
 | Reader behind a removable (external) USB port | Refuse to open it; see [built-in port check](#built-in-port-check) |
 | Reader unplugged or re-enumerated (hibernate) | Current operation fails; the next one uses the new device |
-| System suspend during a scan | libfprint cancels the operation; the next activation reinitializes |
+| System suspend during a scan | libfprint cancels the operation; the next activation reinitializes. For the lock screen, see [How the lock screen works](../INSTALL_55a2.md#how-the-lock-screen-works) |
 
 Failures and recoveries are logged at message level, so they appear in
 `journalctl -u fprintd` without enabling debug output.

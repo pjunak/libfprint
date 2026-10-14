@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: LGPL-2.1-or-later
-"""Scripted fprintd and logind for tests/test-pam-parallel.py.
+"""Scripted fprintd and logind for tests/test-pam-parallel.py, enough for
+pam_fprint_parallel and the distribution's pam_fprintd.
 
 Usage: fake-fprintd.py BUS_ADDRESS SCENARIO_JSON LOG_FILE
 
@@ -25,6 +26,7 @@ from gi.repository import Gio, GLib  # noqa: E402
 FPRINT_XML = '''<node>
   <interface name="net.reactivated.Fprint.Manager">
     <method name="GetDefaultDevice"><arg type="o" direction="out"/></method>
+    <method name="GetDevices"><arg type="ao" direction="out"/></method>
   </interface>
   <interface name="net.reactivated.Fprint.Device">
     <method name="ListEnrolledFingers"><arg type="s" direction="in"/><arg type="as" direction="out"/></method>
@@ -84,6 +86,8 @@ class Fake:
         error = None
         if method == 'GetDefaultDevice':
             return invocation.return_value(GLib.Variant('(o)', (DEVICE,)))
+        if method == 'GetDevices':
+            return invocation.return_value(GLib.Variant('(ao)', ([DEVICE],)))
         if method == 'ListEnrolledFingers':
             fingers = self.scenario.get('enrolled', ['right-index-finger'])
             if not fingers:

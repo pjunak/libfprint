@@ -5,11 +5,13 @@
 Each managed file is the distribution's current PAM policy with one marked block
 inserted before its password stack, so removal deletes exactly what was added.
 Files replaced by `install` are backed up under /var/lib/goodix-fingerprint-pam.
-The KDE lock screen already uses the distribution's kde-fingerprint service.
+The KDE lock screen (kde-fingerprint) already uses the fingerprint; its block
+only keeps a fingerprint attempt interrupted by suspend from disabling the
+fingerprint until the next lock.
 
-`install` and `diff` default to sudo and polkit-1. The login screen (plasmalogin)
-is opt-in: a fingerprint login cannot unlock KWallet or GNOME Keyring, which
-then ask for the password separately.
+`install` and `diff` default to sudo, polkit-1 and kde-fingerprint. The login
+screen (plasmalogin) is opt-in: a fingerprint login cannot unlock KWallet or
+GNOME Keyring, which then ask for the password separately.
 """
 import argparse
 import difflib
@@ -63,11 +65,30 @@ SERVICES = {
         f'-auth       {PARALLEL_CONTROL}  {PARALLEL} mode=conv',
         FAILLOCK_RESET,
     ]),
+    # KDE lock screen. kscreenlocker turns fingerprint off until the next lock
+    # once this stack returns PAM_AUTHINFO_UNAVAIL, and pam_fprintd returns
+    # that for a scan that libfprint cancels at suspend, for its timeout and
+    # for a reader lost to hibernation. A lid-closed wake that starts a scan
+    # is enough. Any failure here is PAM_AUTH_ERR instead, which the lock
+    # screen retries after the next wake.
+    # kscreenlocker also refuses a retry until the failure delay has passed,
+    # timed on a clock that stops during suspend: the 2 s requested by
+    # faillock's preauth for a failure just before sleep would still block
+    # the retry when the lid opens. The fingerprint has no use for the delay,
+    # so the block runs preauth with nodelay. A match jumps over pam_deny and
+    # the distribution's own faillock and pam_fprintd lines, so there is
+    # still one lockout check and one scan.
+    'kde-fingerprint': ((r'auth\s+requisite\s+pam_faillock\.so\s+preauth$',
+                         r'-auth\s+required\s+pam_fprintd\.so$'), [
+        'auth        requisite   pam_faillock.so preauth nodelay',
+        '-auth       [success=3 default=ignore]  pam_fprintd.so',
+        'auth        requisite   pam_deny.so',
+    ]),
 }
 
 # Typing the password at the login screen unlocks the wallets; the fingerprint
 # covers everything after that (lock screen, sudo, polkit).
-DEFAULT_INSTALL = ('sudo', 'polkit-1')
+DEFAULT_INSTALL = ('sudo', 'polkit-1', 'kde-fingerprint')
 
 FPRINTD = 'usr/lib/fprintd'
 PACKAGE_LIBRARY = '/opt/libfprint-goodix/lib'
@@ -118,13 +139,18 @@ def base_policy(root, name):
 
 
 def render(name, base):
-    anchor, block = SERVICES[name]
+    """Insert the block before the anchor: one line pattern, or consecutive
+    line patterns when the block jumps over the lines they match."""
+    anchors, block = SERVICES[name]
+    if isinstance(anchors, str):
+        anchors = (anchors,)
     lines = base.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        if re.match(anchor, line.strip()):
+    for index in range(len(lines) - len(anchors) + 1):
+        if all(re.match(anchor, line.strip()) for anchor, line in zip(anchors, lines[index:])):
             managed = [BEGIN + '\n'] + [entry + '\n' for entry in block] + [END + '\n']
             return ''.join(lines[:index] + managed + lines[index:])
-    raise PolicyError(f'{name}: no "{anchor}" line to insert the fingerprint step before; '
+    expected = '" followed by "'.join(anchors)
+    raise PolicyError(f'{name}: no "{expected}" line to insert the fingerprint step before; '
                       'the distribution policy changed and needs a manual review')
 
 
@@ -296,7 +322,6 @@ def status(root, names, out):
         elif report['current'] is not None and paths(root, name)[1].exists():
             state += f', unmanaged local override {report["file"]}'
         print(f'{name:16} {state}', file=out)
-    print(f'{"kde-fingerprint":16} fingerprint (lock screen; distribution policy)', file=out)
     print(f'fprintd library: {selected_library(root) or "distribution default"}', file=out)
     for problem in problems(root, names):
         print(f'warning: {problem}', file=out)

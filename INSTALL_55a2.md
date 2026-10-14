@@ -8,7 +8,7 @@ KWallet and GNOME Keyring, and uses the finger for everything after that:
 | Prompt | PAM service | Behaviour after setup |
 | --- | --- | --- |
 | Login after boot (Plasma Login Manager) | `plasmalogin` | Password (unlocks the wallets). Fingerprint is [opt-in](#fingerprint-at-the-login-screen-opt-in) |
-| Lock screen, including after suspend/hibernate | `kde-fingerprint` | Swipe at any time; the password field works in parallel |
+| Lock screen, including after suspend/hibernate | `kde-fingerprint` | Swipe at any time; the password field works in parallel. A sleep never turns the fingerprint off |
 | `sudo` in a terminal | `sudo` | One prompt: type the password **or** swipe, whichever comes first; no timeout |
 | `pkexec`, `run0`, KDE administrator dialogs | `polkit-1` | The same, in the dialog |
 
@@ -110,9 +110,11 @@ goodix-fingerprint-pam status
 (From a source checkout without the package: `sudo python3 tools/goodix-fingerprint-pam.py install`.)
 
 By default this enables `sudo` and `polkit-1`, using the package's
-`pam_fprint_parallel.so` (see [below](#how-sudo-and-administrator-prompts-work)).
-The tool writes `/etc/pam.d/polkit-1`
-as a copy of the distribution policy in `/usr/lib/pam.d` with one marked block
+`pam_fprint_parallel.so` (see [below](#how-sudo-and-administrator-prompts-work)),
+and keeps the lock screen from turning the fingerprint off after a sleep
+(see [How the lock screen works](#how-the-lock-screen-works)).
+The tool writes `/etc/pam.d/polkit-1` and `/etc/pam.d/kde-fingerprint`
+as copies of the distribution policies in `/usr/lib/pam.d` with one marked block
 inserted, and inserts the same kind of block into `/etc/pam.d/sudo`. Replaced
 files are backed up in `/var/lib/goodix-fingerprint-pam/backup/`. Keep a
 logged-in terminal open while you test; no service restart is needed.
@@ -186,15 +188,29 @@ without full-disk encryption and Secure Boot.
 ### How the lock screen works
 
 KDE's lock screen runs the password and `kde-fingerprint` stacks in parallel.
-A fingerprint attempt lasts 30 s (three swipes). Afterwards, or after a failed
-attempt, it restarts when the lock screen UI appears again: move the mouse or
-press a key. After four attempts that each fail within two seconds, the lock
-screen disables fingerprint until the next lock; the driver now retries
-transient sensor errors itself, so this should only happen with a broken reader.
+A fingerprint attempt starts when the lock screen first shows its prompt (move
+the mouse or press a key) and allows three swipes within 30 s. A new attempt
+starts after a wrong password and after every wake from suspend or hibernation.
+Moving the mouse does not restart one.
 
-On suspend, libfprint cancels a running verification; on resume (and after
-hibernation, which re-enumerates the USB device) the next attempt
-reinitializes the sensor completely.
+The lock screen (kscreenlocker 6.7) stops offering the fingerprint until the
+next lock when an attempt ends with "authentication information unavailable".
+The distribution's `pam_fprintd` reports exactly that when its 30 s run out
+and when libfprint cancels the scan because the system goes to sleep. A laptop
+with its lid closed can wake for a few seconds and go back to sleep; if the
+lock screen starts a fingerprint attempt during such a wake, opening the lid
+later leaves only the password. The `kde-fingerprint` block that
+`goodix-fingerprint-pam install` adds reports every fingerprint failure as an
+ordinary failed attempt instead, so the fingerprint is offered again after the
+next wake. The block also runs the `faillock` lockout check with `nodelay`.
+After a failure the lock screen waits out the requested delay (2 s) before it
+tries again, timed on a clock that stops during suspend. A failure just before
+the laptop slept would otherwise still block the new attempt when the lid opens.
+Nothing else changes: the account checks come first, and a match runs exactly
+one scan.
+
+On resume (and after hibernation, which re-enumerates the USB device) the next
+attempt reinitializes the sensor completely.
 
 ---
 

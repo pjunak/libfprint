@@ -115,10 +115,13 @@ shows any initialization failure, retry, missed sleep or port reset.
 1. Reboot and type the password at the login screen: immediate login, no
    KWallet or keyring prompt. (Only if `plasmalogin` was enabled: log out, press Enter on an
    empty password and swipe; expect the two wallet prompts.)
-2. Lock with Meta+L and swipe. Lock, wait 40 s, move the mouse, swipe (re-arm
-   after the 30 s attempt). Unlock with the password while the reader waits.
-3. Hibernate, resume, swipe at the lock screen. Repeat with `systemctl suspend`
-   while the lock screen is waiting for a finger.
+2. Lock with Meta+L and swipe. Lock, move the mouse, wait 40 s and swipe:
+   nothing happens (the 30 s attempt is over). Type a wrong password; three
+   seconds later a swipe unlocks. Unlock with the password while the reader
+   waits.
+3. Hibernate, resume, swipe at the lock screen. Lock, move the mouse so the
+   fingerprint attempt starts, close the lid, open it after 20 s: a swipe
+   unlocks (without the `kde-fingerprint` block only the password works).
 4. `sudo -k; sudo true`: swipe. Again: type the password instead. Again: Enter
    on an empty line (ignored), wait a minute (no timeout), then swipe. Three
    wrong fingers, then the password. Ctrl+C: terminal echoes normally after.

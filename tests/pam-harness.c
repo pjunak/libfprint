@@ -3,12 +3,15 @@
  * user against a service file in a private configuration directory.
  *
  *   pam-harness CONFDIR SERVICE USER [--rhost HOST] [--answer TEXT] [--linger-ms MS]
+ *               [--fail-delay print]
  *
  * Prompts mentioning "fingerprint" (pam_fprint_parallel in conversation mode)
  * get TEXT, or a line read from stdin, which may block forever like polkit's
  * agent helper. Other prompts get "asked". --linger-ms keeps the process alive
  * after pam_end(), as polkit-agent-helper-1 does before exiting, so threads a
- * module left behind run against the unloaded module. */
+ * module left behind run against the unloaded module. --fail-delay print
+ * reports the failure delay the stack requests instead of sleeping, as
+ * kscreenlocker does. */
 #include <security/pam_appl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -68,6 +71,13 @@ conversation (int count, const struct pam_message **messages, struct pam_respons
   return PAM_SUCCESS;
 }
 
+static void
+print_fail_delay (int status, unsigned int usec, void *data)
+{
+  printf ("FAILDELAY:%u\n", usec);
+  fflush (stdout);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -75,12 +85,14 @@ main (int argc, char **argv)
   pam_handle_t *pamh = NULL;
   const char *rhost = NULL;
   long linger_ms = 0;
+  int report_delay = 0;
   struct termios term;
   int result;
 
   if (argc < 4)
     {
-      fprintf (stderr, "usage: %s CONFDIR SERVICE USER [--rhost HOST] [--answer TEXT] [--linger-ms MS]\n", argv[0]);
+      fprintf (stderr, "usage: %s CONFDIR SERVICE USER [--rhost HOST] [--answer TEXT] [--linger-ms MS] "
+               "[--fail-delay print]\n", argv[0]);
       return 2;
     }
   for (int i = 4; i + 1 < argc; i += 2)
@@ -91,6 +103,8 @@ main (int argc, char **argv)
         answer = argv[i + 1];
       else if (strcmp (argv[i], "--linger-ms") == 0)
         linger_ms = strtol (argv[i + 1], NULL, 10);
+      else if (strcmp (argv[i], "--fail-delay") == 0)
+        report_delay = strcmp (argv[i + 1], "print") == 0;
     }
   result = pam_start_confdir (argv[2], argv[3], &conv, argv[1], &pamh);
   if (result != PAM_SUCCESS)
@@ -100,6 +114,8 @@ main (int argc, char **argv)
     }
   if (rhost)
     pam_set_item (pamh, PAM_RHOST, rhost);
+  if (report_delay)
+    pam_set_item (pamh, PAM_FAIL_DELAY, (const void *) print_fail_delay);
   result = pam_authenticate (pamh, 0);
   printf ("RESULT:%s\n", pam_strerror (pamh, result));
   if (tcgetattr (STDIN_FILENO, &term) == 0)

@@ -31,7 +31,8 @@ trace = module('trace_import', 'import-goodix-trace.py')
 collector = module('collector', 'collect-goodix.py')
 fingerprint_pam = module('fingerprint_pam', 'goodix-fingerprint-pam.py')
 
-# Vendor policies on Arch/CachyOS (plasma-login-manager 6.7.4, polkit 127, sudo 1.9.17).
+# Vendor policies on Arch/CachyOS (plasma-login-manager 6.7.4, polkit 127, sudo 1.9.17,
+# kscreenlocker 6.7.5).
 VENDOR_PLASMALOGIN = '''#%PAM-1.0
 
 # SPDX-License-Identifier: CC0-1.0
@@ -58,6 +59,21 @@ account    include      system-auth
 password   include      system-auth
 session    include      system-auth
 '''
+VENDOR_KDE_FINGERPRINT = '''#%PAM-1.0
+
+auth       required                    pam_shells.so
+auth       requisite                   pam_nologin.so
+auth       requisite                   pam_faillock.so      preauth
+-auth      required                    pam_fprintd.so
+auth       optional                    pam_permit.so
+auth       required                    pam_env.so
+
+account    include                     system-local-login
+
+password   required                    pam_deny.so
+
+session    include                     system-local-login
+'''
 DISTRO_SUDO = '''#%PAM-1.0
 auth\t\tinclude\t\tsystem-auth
 account\t\tinclude\t\tsystem-auth
@@ -75,6 +91,7 @@ class FingerprintPam(unittest.TestCase):
             (self.root / directory).mkdir(parents=True)
         (self.root / 'usr/lib/pam.d/plasmalogin').write_text(VENDOR_PLASMALOGIN)
         (self.root / 'usr/lib/pam.d/polkit-1').write_text(VENDOR_POLKIT)
+        (self.root / 'usr/lib/pam.d/kde-fingerprint').write_text(VENDOR_KDE_FINGERPRINT)
         (self.root / 'etc/pam.d/sudo').write_text(DISTRO_SUDO)
         (self.root / 'etc/systemd/system/fprintd.service.d/99-goodix-local.conf').write_text(
             '[Service]\nEnvironment=LD_LIBRARY_PATH=/opt/libfprint-goodix/lib\n')
@@ -190,6 +207,40 @@ class FingerprintPam(unittest.TestCase):
         self.assertFalse((self.root / 'etc/pam.d/plasmalogin').exists())
         self.assertIn('pam_fprint_parallel.so', (self.root / 'etc/pam.d/sudo').read_text())
         self.assertIn('sudo             fingerprint, managed', self.run_tool('status')[1])
+
+    def test_lock_screen_failures_stay_retryable(self):
+        self.assertEqual(self.run_tool('install')[0], 0)
+        lines = self.auth_lines('kde-fingerprint')
+        self.assertEqual([line[2] for line in lines],
+                         ['pam_shells.so', 'pam_nologin.so', 'pam_faillock.so', 'pam_fprintd.so', 'pam_deny.so',
+                          'pam_faillock.so', 'pam_fprintd.so', 'pam_permit.so', 'pam_env.so'])
+        # The account checks still come first; the lockout check asks for no
+        # failure delay. Every fingerprint failure, including the
+        # PAM_AUTHINFO_UNAVAIL after which kscreenlocker stops offering the
+        # fingerprint, ends in pam_deny; a match jumps over pam_deny and the
+        # distribution's own faillock and pam_fprintd lines.
+        self.assertIn('auth        requisite   pam_faillock.so preauth nodelay\n',
+                      (self.root / 'etc/pam.d/kde-fingerprint').read_text())
+        self.assertEqual(lines[3][:2], ['-auth', '[success=3 default=ignore]'])
+        self.assertEqual(lines[4][:2], ['auth', 'requisite'])
+        self.assertEqual(lines[5][:2], ['auth', 'requisite'])
+        self.assertEqual(lines[6][:2], ['-auth', 'required'])
+        self.assertEqual(self.run_tool('check'), (0, ''))
+        self.assertIn('kde-fingerprint  fingerprint, managed', self.run_tool('status')[1])
+        self.assertEqual(self.run_tool('uninstall', 'kde-fingerprint')[0], 0)
+        self.assertFalse((self.root / 'etc/pam.d/kde-fingerprint').exists())
+
+    def test_lock_screen_changes_need_review(self):
+        # The managed lines would drop options on the distribution's lines,
+        # and the jump must land right after its pam_fprintd line.
+        for old, new in (('pam_fprintd.so\n', 'pam_fprintd.so max-tries=1\n'),
+                         ('preauth\n', 'preauth deny=5\n'),
+                         ('preauth\n', 'preauth\nauth       optional                    pam_permit.so\n')):
+            (self.root / 'usr/lib/pam.d/kde-fingerprint').write_text(VENDOR_KDE_FINGERPRINT.replace(old, new))
+            code, output = self.run_tool('install', 'kde-fingerprint')
+            self.assertEqual(code, 1)
+            self.assertIn('needs a manual review', output)
+            self.assertFalse((self.root / 'etc/pam.d/kde-fingerprint').exists())
 
     def test_check_reports_updated_setup_and_missing_module(self):
         # A block written by an older version (sequential pam_fprintd) is

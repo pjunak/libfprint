@@ -6,8 +6,13 @@ Terminal-mode tests run the PAM application in a pseudo-terminal and type
 into it; conversation-mode tests feed it through a pipe. A pam_exec step after
 the module records the token pam_unix would receive ("asked" if it had to
 prompt), so each test sees exactly what the rest of the stack gets.
+
+The lock-screen tests run the distribution's pam_fprintd in the kde-fingerprint
+stack that goodix-fingerprint-pam generates, when pam_fprintd is installed.
 """
 import errno
+import glob
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -27,6 +32,12 @@ ROOT = Path(__file__).resolve().parent
 MODULE = os.environ.get('PAM_PARALLEL_MODULE')
 HARNESS = os.environ.get('PAM_HARNESS')
 USER = 'tester'
+PAM_FPRINTD = next((path for pattern in ('/usr/lib/security', '/usr/lib64/security', '/lib/security',
+                                         '/usr/lib/*/security', '/lib/*/security')
+                    for path in glob.glob(pattern + '/pam_fprintd.so')), None)
+_spec = importlib.util.spec_from_file_location('fingerprint_pam', ROOT.parent / 'tools' / 'goodix-fingerprint-pam.py')
+fingerprint_pam = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fingerprint_pam)
 DBUS_CONFIG = '''<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
  "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
 <busconfig>
@@ -62,7 +73,9 @@ def prerequisites():
     return None
 
 
-class Parallel(unittest.TestCase):
+class FakeServices(unittest.TestCase):
+    """A private D-Bus with fake-fprintd.py and a PAM configuration directory."""
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.dir = Path(self.temp.name)
@@ -74,14 +87,6 @@ class Parallel(unittest.TestCase):
         self.address = self.bus.stdout.readline().strip()
         self.fake = None
         self.log = self.dir / 'calls.log'
-        self.token = self.dir / 'token'
-        recorder = self.dir / 'record.sh'
-        recorder.write_text(f'#!/bin/sh\ncat > {self.token}\n')
-        recorder.chmod(0o755)
-        # Stands in for `pam_faillock.so authsucc` in the production stack.
-        self.reset = self.dir / 'faillock-reset'
-        (self.dir / 'authsucc.sh').write_text(f'#!/bin/sh\ntouch {self.reset}\n')
-        (self.dir / 'authsucc.sh').chmod(0o755)
         self.confdir = self.dir / 'pam.d'
         self.confdir.mkdir()
 
@@ -96,6 +101,31 @@ class Parallel(unittest.TestCase):
         self.fake = subprocess.Popen([sys.executable, str(ROOT / 'fake-fprintd.py'), self.address,
                                       json.dumps(scenario), str(self.log)], stdout=subprocess.PIPE, text=True)
         self.assertEqual(self.fake.stdout.readline().strip(), 'READY')
+
+    def calls(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def environment(self):
+        return {key: value for key, value in os.environ.items() if not key.startswith('SSH_')}
+
+    def run_pipe(self, *extra, stdin=None, deadline=15):
+        process = subprocess.run([HARNESS, str(self.confdir), 'test', USER, *extra], input=stdin,
+                                 capture_output=True, text=True, timeout=deadline, env=self.environment())
+        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
+        return process.stdout
+
+
+class Parallel(FakeServices):
+    def setUp(self):
+        super().setUp()
+        self.token = self.dir / 'token'
+        recorder = self.dir / 'record.sh'
+        recorder.write_text(f'#!/bin/sh\ncat > {self.token}\n')
+        recorder.chmod(0o755)
+        # Stands in for `pam_faillock.so authsucc` in the production stack.
+        self.reset = self.dir / 'faillock-reset'
+        (self.dir / 'authsucc.sh').write_text(f'#!/bin/sh\ntouch {self.reset}\n')
+        (self.dir / 'authsucc.sh').chmod(0o755)
 
     def configure(self, *options, module=None):
         """The production stack from goodix-fingerprint-pam, with stand-ins."""
@@ -132,14 +162,8 @@ class Parallel(unittest.TestCase):
         thread.start()
         return thread
 
-    def calls(self):
-        return self.log.read_text().splitlines() if self.log.exists() else []
-
     def token_seen(self):
         return self.token.read_text().rstrip('\0') if self.token.exists() else None
-
-    def environment(self):
-        return {key: value for key, value in os.environ.items() if not key.startswith('SSH_')}
 
     def run_tty(self, keys=(), extra=(), deadline=15, expect_signal=None):
         """Run in a pseudo-terminal. keys: (seconds after the prompt, bytes)."""
@@ -188,12 +212,6 @@ class Parallel(unittest.TestCase):
         if expect_signal is None:
             self.assertTrue(os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0, f'{status}: {output}')
         return output, status, attributes
-
-    def run_pipe(self, *extra, stdin=None, deadline=15):
-        process = subprocess.run([HARNESS, str(self.confdir), 'test', USER, *extra], input=stdin,
-                                 capture_output=True, text=True, timeout=deadline, env=self.environment())
-        self.assertEqual(process.returncode, 0, process.stdout + process.stderr)
-        return process.stdout
 
     # ---- terminal mode ----
 
@@ -408,6 +426,69 @@ class Parallel(unittest.TestCase):
         self.assertFalse(self.reset.exists())
         self.assertIsNone(self.token_seen())
         self.assertEqual(self.calls()[-2:], ['VerifyStop', 'Release'])
+
+
+class LockScreen(FakeServices):
+    """kscreenlocker's kde-fingerprint stack: the distribution's pam_fprintd,
+    which reaches fprintd on the system bus. kscreenlocker turns fingerprint
+    off until the next lock when the stack returns PAM_AUTHINFO_UNAVAIL, and
+    retries after the next wake when it returns PAM_AUTH_ERR, once the
+    failure delay has passed (the harness reports it like kscreenlocker)."""
+
+    # pam_shells and pam_nologin of the distribution policy need a real user;
+    # the faillock check, the fingerprint line and what follows are kept.
+    VENDOR = ('#%PAM-1.0\n'
+              'auth       requisite                   pam_faillock.so      preauth\n'
+              '-auth      required                    pam_fprintd.so\n'
+              'auth       optional                    pam_permit.so\n')
+
+    def setUp(self):
+        if not PAM_FPRINTD:
+            self.skipTest('pam_fprintd.so is not installed')
+        super().setUp()
+
+    def environment(self):
+        return {**super().environment(), 'DBUS_SYSTEM_BUS_ADDRESS': self.address}
+
+    def authenticate(self, managed, **scenario):
+        if self.fake:
+            self.fake.terminate()
+            self.fake.wait()
+            self.fake.stdout.close()
+        self.log.unlink(missing_ok=True)
+        self.start_fprintd(**scenario)
+        policy = fingerprint_pam.render('kde-fingerprint', self.VENDOR) if managed else self.VENDOR
+        (self.confdir / 'test').write_text(policy)
+        return self.run_pipe('--fail-delay', 'print', stdin='')
+
+    def test_scan_cancelled_by_suspend_stays_retryable(self):
+        # libfprint cancels a running scan at suspend; fprintd reports that as
+        # verify-unknown-error.
+        output = self.authenticate(False, verify=['unknown-error'])
+        self.assertIn('RESULT:Authentication service cannot retrieve authentication info', output)
+        # faillock's preauth asks for about 2 s; kscreenlocker counts it on a
+        # clock that stops during suspend, so it would block the retry at wake.
+        self.assertNotIn('FAILDELAY:0\n', output)
+        output = self.authenticate(True, verify=['unknown-error'])
+        self.assertIn('RESULT:Authentication failure', output)
+        self.assertIn('FAILDELAY:0\n', output)
+        self.assertEqual(self.calls()[-2:], ['VerifyStop', 'Release'])
+
+    def test_used_up_tries_stay_retryable(self):
+        output = self.authenticate(False, verify=['no-match'] * 3)
+        self.assertIn('RESULT:Have exhausted maximum number of retries for service', output)
+        output = self.authenticate(True, verify=['no-match'] * 3)
+        self.assertIn('RESULT:Authentication failure', output)
+        self.assertIn('FAILDELAY:0\n', output)
+        self.assertEqual(self.calls().count('VerifyStart any'), 3)
+
+    def test_match_runs_one_scan(self):
+        # The jump over the distribution's pam_fprintd line must not start a
+        # second verification after a match.
+        output = self.authenticate(True, verify=['match'])
+        self.assertIn('RESULT:Success', output)
+        self.assertEqual(self.calls().count(f'Claim {USER}'), 1)
+        self.assertEqual(self.calls().count('VerifyStart any'), 1)
 
 
 if __name__ == '__main__':

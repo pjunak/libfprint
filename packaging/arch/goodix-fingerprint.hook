@@ -7,6 +7,7 @@ Operation = Upgrade
 Type = Path
 Target = usr/lib/pam.d/plasmalogin
 Target = usr/lib/pam.d/polkit-1
+Target = usr/lib/pam.d/kde-fingerprint
 Target = etc/pam.d/sudo
 Target = usr/lib/fprintd
 Target = opt/libfprint-goodix/lib/libfprint-2.so.2.0.0
