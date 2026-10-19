@@ -2308,6 +2308,64 @@ test_driver_identify_suspend_busy_error (void)
   g_assert_no_error (error);
 }
 
+typedef struct
+{
+  guint    completed;
+  guint    close_order;
+  guint    resume_order;
+  gboolean close_ok;
+  GError  *resume_error;
+} CloseResumeData;
+
+static void
+close_resume_close_cb (GObject *source, GAsyncResult *res, gpointer user_data)
+{
+  CloseResumeData *data = user_data;
+
+  data->close_ok = fp_device_close_finish (FP_DEVICE (source), res, NULL);
+  data->close_order = ++data->completed;
+}
+
+static void
+close_resume_resume_cb (GObject *source, GAsyncResult *res, gpointer user_data)
+{
+  CloseResumeData *data = user_data;
+
+  fp_device_resume_finish (FP_DEVICE (source), res, &data->resume_error);
+  data->resume_order = ++data->completed;
+}
+
+static void
+test_driver_resume_during_close (void)
+{
+  g_autoptr(FpAutoResetClass) dev_class = auto_reset_device_class ();
+  g_autoptr(FpAutoCloseDevice) device = NULL;
+  g_autoptr(GError) error = NULL;
+  CloseResumeData data = { 0 };
+
+  device = g_object_new (FPI_TYPE_DEVICE_FAKE, NULL);
+  g_assert_true (fp_device_open_sync (device, NULL, NULL));
+  g_assert_true (fp_device_suspend_sync (device, NULL, &error));
+  g_assert_no_error (error);
+
+  /* fprintd releases the device at suspend and the system wakes before the
+   * close has completed (it returns from an idle at the earliest). */
+  fp_device_close (device, NULL, close_resume_close_cb, &data);
+  fp_device_resume (device, NULL, close_resume_resume_cb, &data);
+  while (data.completed < 2)
+    g_main_context_iteration (NULL, TRUE);
+
+  /* The resume waits for the close, as a suspend does. */
+  g_assert_true (data.close_ok);
+  g_assert_no_error (data.resume_error);
+  g_assert_cmpuint (data.close_order, ==, 1);
+  g_assert_cmpuint (data.resume_order, ==, 2);
+  g_assert_false (fp_device_is_open (device));
+
+  g_assert_true (fp_device_open_sync (device, NULL, &error));
+  g_assert_no_error (error);
+}
+
 static void
 test_driver_identify_suspend_while_idle (void)
 {
@@ -3509,6 +3567,7 @@ main (int argc, char *argv[])
   g_test_add_func ("/driver/identify/suspend_succeeds", test_driver_identify_suspend_succeeds);
   g_test_add_func ("/driver/identify/suspend_busy_error", test_driver_identify_suspend_busy_error);
   g_test_add_func ("/driver/identify/suspend_while_idle", test_driver_identify_suspend_while_idle);
+  g_test_add_func ("/driver/resume_during_close", test_driver_resume_during_close);
 
   g_test_add_func ("/driver/identify/warmup_cooldown", test_driver_identify_warmup_cooldown);
 

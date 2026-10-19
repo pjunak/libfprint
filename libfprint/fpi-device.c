@@ -1641,6 +1641,12 @@ fpi_device_suspend (FpDevice *device)
     }
 }
 
+static void
+resume_after_current_task (FpDevice *device)
+{
+  fpi_device_resume_complete (device, NULL);
+}
+
 void
 fpi_device_resume (FpDevice *device)
 {
@@ -1676,9 +1682,14 @@ fpi_device_resume (FpDevice *device)
     case FPI_DEVICE_ACTION_DELETE:
     case FPI_DEVICE_ACTION_LIST:
     case FPI_DEVICE_ACTION_CLEAR_STORAGE:
-      /* cannot happen as we make sure these tasks complete before suspend */
-      g_assert_not_reached ();
-      complete_suspend_resume_task (device);
+      /* Closing and clearing the storage are accepted while suspended, so the
+       * system may wake before one has completed. Like a suspend, the resume
+       * waits for the short task. */
+      g_signal_connect_object (priv->current_task,
+                               "notify::completed",
+                               G_CALLBACK (resume_after_current_task),
+                               device,
+                               G_CONNECT_SWAPPED);
       break;
     }
 }
