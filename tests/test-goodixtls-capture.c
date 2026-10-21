@@ -339,6 +339,25 @@ watchdog (gpointer unused)
   return G_SOURCE_REMOVE;
 }
 
+/* The deadlines only catch hangs. AddressSanitizer builds (the CI job adds
+ * coverage instrumentation too) run this suite about 20 times slower. */
+#if defined(__SANITIZE_ADDRESS__)
+#define DEADLINE_SCALE 20
+#elif defined(__has_feature)
+#if __has_feature (address_sanitizer)
+#define DEADLINE_SCALE 20
+#endif
+#endif
+#ifndef DEADLINE_SCALE
+#define DEADLINE_SCALE 1
+#endif
+
+static guint
+add_watchdog (guint seconds)
+{
+  return g_timeout_add_seconds (seconds * DEADLINE_SCALE, watchdog, NULL);
+}
+
 static FpDevice *
 new_device (void)
 {
@@ -424,7 +443,7 @@ test_capture (gconstpointer fragment)
   setup_peer (GPOINTER_TO_UINT (fragment));
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (12, watchdog, NULL);
+  guint guard = add_watchdog (12);
   for (guint cycle = 0; cycle < 2; cycle++)
     {
       g_assert_true (fp_device_open_sync (device, NULL, &error));
@@ -467,7 +486,7 @@ test_enroll (void)
   enroll_progress = 0;
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (20, watchdog, NULL);
+  guint guard = add_watchdog (20);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   g_autoptr(FpPrint) print = fp_device_enroll_sync (device, fp_print_new (device), NULL,
@@ -533,7 +552,7 @@ test_cancel_reactivate (gconstpointer phase)
   g_autoptr(GError) error = NULL;
   g_autoptr(GCancellable) cancel = g_cancellable_new ();
   test_cancel = cancel;
-  guint guard = g_timeout_add_seconds (12, watchdog, NULL);
+  guint guard = add_watchdog (12);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   guint which = GPOINTER_TO_UINT (phase);
@@ -597,7 +616,7 @@ test_bad_reply (gconstpointer fault)
   invalid_baseline = GPOINTER_TO_UINT (fault) == 1;
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (8, watchdog, NULL);
+  guint guard = add_watchdog (8);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   /* Both faults persist, so the single initialization retry fails too. */
@@ -646,7 +665,7 @@ test_windows_key (gconstpointer data)
   sensor_key = variant == WINDOWS_KEY_MATCHES ? 0x5a : variant == WINDOWS_KEY_WRONG ? 0x11 : 0;
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (8, watchdog, NULL);
+  guint guard = add_watchdog (8);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   if (variant != WINDOWS_KEY_MATCHES)
@@ -686,7 +705,7 @@ test_short_swipe (void)
   short_swipe = TRUE;
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (8, watchdog, NULL);
+  guint guard = add_watchdog (8);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   g_assert_null (fp_device_capture_sync (device, TRUE, NULL, &error));
@@ -712,7 +731,7 @@ test_mode_timeout (void)
   g_autoptr(GError) error = NULL;
   /* Two reply timeouts, one port reset with its two-second settle, and a
    * final timed-out initialization. */
-  guint guard = g_timeout_add_seconds (15, watchdog, NULL);
+  guint guard = add_watchdog (15);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   g_assert_null (fp_device_capture_sync (device, TRUE, NULL, &error));
@@ -744,7 +763,7 @@ test_sleep_failure_keeps_result (void)
   short_swipe = TRUE;
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (8, watchdog, NULL);
+  guint guard = add_watchdog (8);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   /* The sensor rejects sleep after a short swipe. The caller must still see
@@ -803,7 +822,7 @@ test_verify_transient_retry (void)
   setup_peer (65536);
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (30, watchdog, NULL);
+  guint guard = add_watchdog (30);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   g_autoptr(FpPrint) print = enroll_print (device);
@@ -838,7 +857,7 @@ test_rebaseline (gconstpointer always_slow)
   slow_fdt_up_count = always_slow ? 2 : 1;
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (8, watchdog, NULL);
+  guint guard = add_watchdog (8);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   g_autoptr(FpImage) image = fp_device_capture_sync (device, TRUE, NULL, &error);
@@ -865,7 +884,7 @@ test_idle_rearm (void)
   idle_frames_before_touch = GOODIX_IDLE_REARM_FRAMES + 10;
   g_autoptr(FpDevice) device = new_device ();
   g_autoptr(GError) error = NULL;
-  guint guard = g_timeout_add_seconds (10, watchdog, NULL);
+  guint guard = add_watchdog (10);
   g_assert_true (fp_device_open_sync (device, NULL, &error));
   g_assert_no_error (error);
   g_autoptr(FpImage) image = fp_device_capture_sync (device, TRUE, NULL, &error);

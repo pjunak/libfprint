@@ -108,7 +108,10 @@ jobs:
         env:
           ASAN_OPTIONS: detect_leaks=1
           UBSAN_OPTIONS: halt_on_error=1
-        run: meson test -C build --print-errorlogs
+        # Instrumented, the recognition and capture suites run about 20 times
+        # slower (33 s and 155 s on a Ryzen 5 4500U); their limits are for
+        # normal builds.
+        run: meson test -C build --print-errorlogs --timeout-multiplier 5
       - name: Fuzz packet and template readers
         env:
           G_DEBUG: fatal-warnings
@@ -136,7 +139,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - run: >-
-          pacman -Syu --noconfirm git meson ninja pkgconf glib2 libgusb openssl opencv cairo
+          pacman -Syu --noconfirm git meson ninja pkgconf glib2 glib2-devel libgusb openssl opencv cairo
           doctest python python-gobject dbus pam systemd-libs
       - uses: actions/checkout@v7
         with:
