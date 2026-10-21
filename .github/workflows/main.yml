@@ -149,6 +149,8 @@ jobs:
       - run: meson test -C build --print-errorlogs
       - name: Verify package source and recipe
         run: |
+          # The checkout belongs to the runner's user, not the container's root.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           python tools/make-source-package.py /tmp/goodix-package
           useradd -m builder
           chown -R builder:builder /tmp/goodix-package
