@@ -48,6 +48,12 @@ static const GoodixProfile profiles[] = {
    config_55a2, sizeof (config_55a2)},
   {0x55a2, "GF3206_RTSEC_APP_10062", 56, 176, 4, 1024, 600,
    config_55a2, sizeof (config_55a2)},
+  /* The same reader spells its firmware GF3208 while its MCU has no
+   * configuration, as after it has rebooted by itself; it reads GF3206 again
+   * once the configuration below is uploaded. Refusing this spelling leaves
+   * the reader unconfigured for good. */
+  {0x55a2, "GF3208_RTSEC_APP_10052", 56, 176, 4, 1024, 600,
+   config_55a2, sizeof (config_55a2)},
 };
 
 const GoodixProfile *

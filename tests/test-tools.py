@@ -413,7 +413,8 @@ class Tools(unittest.TestCase):
             report = diag.collect(root)['devices'][0]
             self.assertEqual(report['profile'], '55a2')
             self.assertEqual(report['supported_firmware'],
-                             ['GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062'])
+                             ['GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062',
+                              'GF3208_RTSEC_APP_10052'])
             self.assertNotIn('firmware', report)
             (device / 'idProduct').write_text('55b4\n')
             self.assertEqual(diag.collect(root)['devices'][0]['supported_firmware'], [])
@@ -559,12 +560,12 @@ class TraceImport(unittest.TestCase):
         return rows
 
     def test_supported_firmware_and_unknown_variants(self):
-        for firmware in ('GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062'):
+        for firmware in ('GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062', 'GF3208_RTSEC_APP_10052'):
             with self.subTest(firmware=firmware):
                 _, observed = trace.import_rows(self.rows_with_firmware(firmware), 3, 7)
                 self.assertEqual(observed, firmware)
         for firmware in ('GF3206_RTSEC_APP_10053', 'GF3206_RTSEC_APP_10052_extra',
-                         'GF3268_RTSEC_APP_10041'):
+                         'GF3208_RTSEC_APP_10062', 'GF3268_RTSEC_APP_10041'):
             with self.subTest(firmware=firmware):
                 with self.assertRaisesRegex(ValueError, 'Unsupported recorded firmware'):
                     trace.import_rows(self.rows_with_firmware(firmware), 3, 7)

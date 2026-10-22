@@ -112,7 +112,7 @@ def import_rows(rows, bus, address):
             raise ValueError(f'Unexpected response command for 0x{command:02x}')
         if command == 0xa8:
             firmware = packets[1][1].rstrip(b'\0').decode('ascii')
-    if firmware not in ('GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062'):
+    if firmware not in ('GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062', 'GF3208_RTSEC_APP_10052'):
         raise ValueError(f'Unsupported recorded firmware: {firmware!r}')
     return steps, firmware
 

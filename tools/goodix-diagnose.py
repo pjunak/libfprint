@@ -71,7 +71,8 @@ def collect(root=Path('/')):
             if vid == '27c6':
                 devices.append({'usb_id': f'{vid}:{pid}', 'sysfs': str(path),
                                 'profile': '55a2' if pid == '55a2' else 'unsupported',
-                                'supported_firmware': ['GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062']
+                                'supported_firmware': ['GF3206_RTSEC_APP_10052', 'GF3206_RTSEC_APP_10062',
+                                                       'GF3208_RTSEC_APP_10052']
                                 if pid == '55a2' else []})
         except OSError:
             continue

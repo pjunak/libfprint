@@ -8,6 +8,7 @@ test_profiles (void)
 {
   const GoodixProfile *p = goodix_profile_lookup (0x55a2, "GF3206_RTSEC_APP_10062");
   const GoodixProfile *older = goodix_profile_lookup (0x55a2, "GF3206_RTSEC_APP_10052");
+  const GoodixProfile *unconfigured = goodix_profile_lookup (0x55a2, "GF3208_RTSEC_APP_10052");
 
   g_assert_nonnull (p);
   g_assert_nonnull (older);
@@ -18,6 +19,13 @@ test_profiles (void)
   g_assert_cmpuint (older->reset_number, ==, p->reset_number);
   g_assert_cmpuint (older->tls_settle_ms, ==, p->tls_settle_ms);
   g_assert_cmpmem (older->config, older->config_length, p->config, p->config_length);
+  g_assert_nonnull (unconfigured);
+  g_assert_cmpuint (unconfigured->width, ==, older->width);
+  g_assert_cmpuint (unconfigured->height, ==, older->height);
+  g_assert_cmpuint (unconfigured->crop, ==, older->crop);
+  g_assert_cmpuint (unconfigured->reset_number, ==, older->reset_number);
+  g_assert_cmpuint (unconfigured->tls_settle_ms, ==, older->tls_settle_ms);
+  g_assert_cmpmem (unconfigured->config, unconfigured->config_length, older->config, older->config_length);
   g_assert_cmpuint (p->width * p->height * 3 / 2, ==, GOODIX55X4_RAW_FRAME_SIZE);
   g_assert_null (goodix_profile_lookup (0x55a4, p->firmware));
   g_assert_null (goodix_profile_lookup (0x55a4, older->firmware));
@@ -25,6 +33,7 @@ test_profiles (void)
   g_assert_null (goodix_profile_lookup (0x55a2, "GF3206_RTSEC_APP_10053"));
   g_assert_null (goodix_profile_lookup (0x55a2, "GF3206_RTSEC_APP_10052_extra"));
   g_assert_null (goodix_profile_lookup (0x55a2, "GF3206_RTSEC_APP_99999"));
+  g_assert_null (goodix_profile_lookup (0x55a2, "GF3208_RTSEC_APP_10062"));
   g_assert_null (goodix_profile_lookup (0x55a2, NULL));
 }
 
